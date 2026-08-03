@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { db } from '@/lib/db';
-import { verifyPassword, generateToken } from '@/lib/auth';
+import { createClient } from '@/lib/supabase/server';
+import { supabaseAdmin } from '@/lib/supabase/admin';
 
 export async function POST(req: NextRequest) {
   try {
@@ -12,29 +12,59 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Email/username and password are required' }, { status: 400 });
     }
 
-    const user = await db.user.findFirst({
-      where: {
-        OR: [
-          { email: loginEmail || undefined },
-          { username: loginUsername || undefined },
-        ],
-      },
+    const supabase = await createClient();
+    let signInEmail = loginEmail;
+
+    // If logging in with username, look up the email
+    if (!signInEmail && loginUsername) {
+      const { data: profile } = await supabaseAdmin
+        .from('profiles')
+        .select('id')
+        .eq('username', loginUsername)
+        .single();
+      if (!profile) {
+        return NextResponse.json({ error: 'Invalid credentials' }, { status: 401 });
+      }
+      const { data: userData } = await supabaseAdmin.auth.admin.getUserById(profile.id);
+      signInEmail = userData.user?.email;
+      if (!signInEmail) {
+        return NextResponse.json({ error: 'Invalid credentials' }, { status: 401 });
+      }
+    }
+
+    const { data, error } = await supabase.auth.signInWithPassword({
+      email: signInEmail!,
+      password,
     });
 
-    if (!user) {
+    if (error) {
       return NextResponse.json({ error: 'Invalid credentials' }, { status: 401 });
     }
 
-    const isValid = await verifyPassword(password, user.password);
-    if (!isValid) {
-      return NextResponse.json({ error: 'Invalid credentials' }, { status: 401 });
-    }
+    const { data: profile } = await supabaseAdmin
+      .from('profiles')
+      .select('*')
+      .eq('id', data.user.id)
+      .single();
 
-    const token = generateToken(user.id);
+    const user = {
+      id: profile.id,
+      fullName: profile.full_name,
+      username: profile.username,
+      email: data.user.email!,
+      phone: profile.phone,
+      role: profile.role,
+      isActivated: profile.is_activated,
+      activatedAt: profile.activated_at,
+      referralCode: profile.referral_code,
+      profilePicture: profile.profile_picture,
+      bankName: profile.bank_name,
+      bankAccount: profile.bank_account,
+      bankAccountName: profile.bank_account_name,
+      createdAt: profile.created_at,
+    };
 
-    const { password: _, ...userWithoutPassword } = user;
-
-    return NextResponse.json({ user: userWithoutPassword, token });
+    return NextResponse.json({ user, token: data.session.access_token });
   } catch (error: unknown) {
     console.error('Login error:', error);
     const message = error instanceof Error ? error.message : 'Login failed';

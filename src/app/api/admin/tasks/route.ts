@@ -1,22 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { db } from '@/lib/db';
-import { verifyToken } from '@/lib/auth';
+import { supabaseAdmin } from '@/lib/supabase/admin';
+import { getAuthAdmin } from '@/lib/supabase/helpers';
 
 export async function GET(req: NextRequest) {
   try {
-    const authHeader = req.headers.get('Authorization');
-    if (!authHeader?.startsWith('Bearer ')) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
-
-    const token = authHeader.split(' ')[1];
-    const payload = verifyToken(token);
-    if (!payload) {
-      return NextResponse.json({ error: 'Invalid or expired token' }, { status: 401 });
-    }
-
-    const admin = await db.user.findUnique({ where: { id: payload.userId } });
-    if (!admin || admin.role !== 'admin') {
+    const auth = await getAuthAdmin();
+    if (!auth) {
       return NextResponse.json({ error: 'Admin access required' }, { status: 403 });
     }
 
@@ -24,29 +13,66 @@ export async function GET(req: NextRequest) {
     const page = Number(searchParams.get('page')) || 1;
     const limit = Number(searchParams.get('limit')) || 20;
 
-    const [tasks, total] = await Promise.all([
-      db.task.findMany({
-        include: {
-          _count: { select: { submissions: true } },
-          submissions: {
-            where: { status: 'pending' },
-            take: 5,
-            include: {
-              user: {
-                select: { id: true, fullName: true, username: true },
-              },
-            },
-          },
+    // Fetch tasks with all submissions (joined with profiles) so we can count and filter in JS
+    const { data: tasks, count, error } = await supabaseAdmin
+      .from('tasks')
+      .select(
+        `*,
+        task_submissions(
+          id,
+          user_id,
+          proof,
+          proof_url,
+          status,
+          created_at,
+          profiles!task_submissions_user_id_fkey(full_name, username)
+        )`,
+        { count: 'exact' }
+      )
+      .order('created_at', { ascending: false })
+      .range((page - 1) * limit, page * limit - 1);
+
+    if (error) throw error;
+    const total = count || 0;
+
+    // Map to match old Prisma shape
+    const mappedTasks = (tasks || []).map((row: Record<string, unknown>) => {
+      const allSubmissions = row.task_submissions as Array<Record<string, unknown>> || [];
+
+      // Filter to pending submissions only, take first 5
+      const pendingSubs = allSubmissions
+        .filter((s) => s.status === 'pending')
+        .slice(0, 5);
+
+      return {
+        id: row.id,
+        title: row.title,
+        instructions: row.instructions,
+        reward: Number(row.reward),
+        requiresProof: row.requires_proof,
+        isActive: row.is_active,
+        createdAt: row.created_at,
+        updatedAt: row.updated_at,
+        _count: {
+          submissions: allSubmissions.length,
         },
-        orderBy: { createdAt: 'desc' },
-        skip: (page - 1) * limit,
-        take: limit,
-      }),
-      db.task.count(),
-    ]);
+        submissions: pendingSubs.map((s: Record<string, unknown>) => {
+          const profile = s.profiles as Record<string, unknown> | null;
+          return {
+            id: s.id,
+            userId: s.user_id,
+            userName: profile?.full_name || profile?.username || 'Unknown',
+            proof: s.proof,
+            proofUrl: s.proof_url,
+            status: s.status,
+            submittedAt: s.created_at,
+          };
+        }),
+      };
+    });
 
     return NextResponse.json({
-      tasks,
+      tasks: mappedTasks,
       pagination: { page, limit, total, totalPages: Math.ceil(total / limit) },
     });
   } catch (error: unknown) {
@@ -58,19 +84,8 @@ export async function GET(req: NextRequest) {
 
 export async function PUT(req: NextRequest) {
   try {
-    const authHeader = req.headers.get('Authorization');
-    if (!authHeader?.startsWith('Bearer ')) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
-
-    const token = authHeader.split(' ')[1];
-    const payload = verifyToken(token);
-    if (!payload) {
-      return NextResponse.json({ error: 'Invalid or expired token' }, { status: 401 });
-    }
-
-    const admin = await db.user.findUnique({ where: { id: payload.userId } });
-    if (!admin || admin.role !== 'admin') {
+    const auth = await getAuthAdmin();
+    if (!auth) {
       return NextResponse.json({ error: 'Admin access required' }, { status: 403 });
     }
 
@@ -83,13 +98,28 @@ export async function PUT(req: NextRequest) {
     if (title !== undefined) updateData.title = title;
     if (instructions !== undefined) updateData.instructions = instructions;
     if (reward !== undefined) updateData.reward = Number(reward);
-    if (requiresProof !== undefined) updateData.requiresProof = Boolean(requiresProof);
-    if (isActive !== undefined) updateData.isActive = Boolean(isActive);
+    if (requiresProof !== undefined) updateData.requires_proof = Boolean(requiresProof);
+    if (isActive !== undefined) updateData.is_active = Boolean(isActive);
 
-    const task = await db.task.update({
-      where: { id: taskId },
-      data: updateData,
-    });
+    const { data, error } = await supabaseAdmin
+      .from('tasks')
+      .update(updateData)
+      .eq('id', taskId)
+      .select()
+      .single();
+
+    if (error) throw error;
+
+    const task = {
+      id: data.id,
+      title: data.title,
+      instructions: data.instructions,
+      reward: Number(data.reward),
+      requiresProof: data.requires_proof,
+      isActive: data.is_active,
+      createdAt: data.created_at,
+      updatedAt: data.updated_at,
+    };
 
     return NextResponse.json({ task, message: 'Task updated successfully' });
   } catch (error: unknown) {
@@ -101,19 +131,8 @@ export async function PUT(req: NextRequest) {
 
 export async function DELETE(req: NextRequest) {
   try {
-    const authHeader = req.headers.get('Authorization');
-    if (!authHeader?.startsWith('Bearer ')) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
-
-    const token = authHeader.split(' ')[1];
-    const payload = verifyToken(token);
-    if (!payload) {
-      return NextResponse.json({ error: 'Invalid or expired token' }, { status: 401 });
-    }
-
-    const admin = await db.user.findUnique({ where: { id: payload.userId } });
-    if (!admin || admin.role !== 'admin') {
+    const auth = await getAuthAdmin();
+    if (!auth) {
       return NextResponse.json({ error: 'Admin access required' }, { status: 403 });
     }
 
@@ -123,8 +142,20 @@ export async function DELETE(req: NextRequest) {
       return NextResponse.json({ error: 'Task ID is required' }, { status: 400 });
     }
 
-    await db.taskSubmission.deleteMany({ where: { taskId } });
-    await db.task.delete({ where: { id: taskId } });
+    // Delete submissions first, then the task
+    const { error: subError } = await supabaseAdmin
+      .from('task_submissions')
+      .delete()
+      .eq('task_id', taskId);
+
+    if (subError) throw subError;
+
+    const { error } = await supabaseAdmin
+      .from('tasks')
+      .delete()
+      .eq('id', taskId);
+
+    if (error) throw error;
 
     return NextResponse.json({ message: 'Task deleted successfully' });
   } catch (error: unknown) {
@@ -136,19 +167,8 @@ export async function DELETE(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   try {
-    const authHeader = req.headers.get('Authorization');
-    if (!authHeader?.startsWith('Bearer ')) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
-
-    const token = authHeader.split(' ')[1];
-    const payload = verifyToken(token);
-    if (!payload) {
-      return NextResponse.json({ error: 'Invalid or expired token' }, { status: 401 });
-    }
-
-    const admin = await db.user.findUnique({ where: { id: payload.userId } });
-    if (!admin || admin.role !== 'admin') {
+    const auth = await getAuthAdmin();
+    if (!auth) {
       return NextResponse.json({ error: 'Admin access required' }, { status: 403 });
     }
 
@@ -161,12 +181,14 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Action must be approve or reject' }, { status: 400 });
     }
 
-    const submission = await db.taskSubmission.findUnique({
-      where: { id: submissionId },
-      include: { task: true, user: true },
-    });
+    // Fetch submission with task and user profile
+    const { data: submission, error: fetchError } = await supabaseAdmin
+      .from('task_submissions')
+      .select('*, tasks(title, reward), profiles(username)')
+      .eq('id', submissionId)
+      .single();
 
-    if (!submission) {
+    if (fetchError || !submission) {
       return NextResponse.json({ error: 'Submission not found' }, { status: 404 });
     }
 
@@ -175,44 +197,52 @@ export async function POST(req: NextRequest) {
     }
 
     const newStatus = action === 'approve' ? 'approved' : 'rejected';
+    const task = submission.tasks as Record<string, unknown>;
+    const profile = submission.profiles as Record<string, unknown> | null;
 
-    await db.taskSubmission.update({
-      where: { id: submissionId },
-      data: { status: newStatus },
-    });
+    const { error: updateError } = await supabaseAdmin
+      .from('task_submissions')
+      .update({ status: newStatus })
+      .eq('id', submissionId);
+
+    if (updateError) throw updateError;
 
     if (action === 'approve') {
       // Credit reward wallet
-      await db.wallet.update({
-        where: { userId_type: { userId: submission.userId, type: 'reward' } },
-        data: { balance: { increment: submission.task.reward } },
-      });
+      const { data: wallet } = await supabaseAdmin
+        .from('wallets')
+        .select('id, balance')
+        .eq('user_id', submission.user_id)
+        .eq('type', 'reward')
+        .single();
 
-      await db.notification.create({
-        data: {
-          userId: submission.userId,
-          title: 'Task Approved! 🎉',
-          message: `Your submission for '${submission.task.title}' was approved. ₦${submission.task.reward.toLocaleString()} has been credited.`,
-          type: 'task',
-        },
+      if (wallet) {
+        await supabaseAdmin
+          .from('wallets')
+          .update({ balance: Number(wallet.balance) + Number(task.reward) })
+          .eq('id', wallet.id);
+      }
+
+      await supabaseAdmin.from('notifications').insert({
+        user_id: submission.user_id,
+        title: 'Task Approved! 🎉',
+        message: `Your submission for '${task.title}' was approved. ₦${Number(task.reward).toLocaleString()} has been credited.`,
+        type: 'task',
       });
     } else {
-      await db.notification.create({
-        data: {
-          userId: submission.userId,
-          title: 'Task Rejected',
-          message: `Your submission for '${submission.task.title}' was rejected.`,
-          type: 'task',
-        },
+      await supabaseAdmin.from('notifications').insert({
+        user_id: submission.user_id,
+        title: 'Task Rejected',
+        message: `Your submission for '${task.title}' was rejected.`,
+        type: 'task',
       });
     }
 
-    await db.auditLog.create({
-      data: {
-        userId: payload.userId,
-        action: `TASK_${action.toUpperCase()}`,
-        details: `${action}d task submission ${submissionId} for task '${submission.task.title}'`,
-      },
+    // Audit log
+    await supabaseAdmin.from('audit_logs').insert({
+      user_id: auth.user.id,
+      action: `TASK_${action.toUpperCase()}`,
+      details: `${action}d task submission ${submissionId} for task '${task.title}'`,
     });
 
     return NextResponse.json({ message: `Submission ${newStatus}` });

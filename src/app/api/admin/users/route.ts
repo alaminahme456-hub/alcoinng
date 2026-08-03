@@ -1,22 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { db } from '@/lib/db';
-import { verifyToken } from '@/lib/auth';
+import { supabaseAdmin } from '@/lib/supabase/admin';
+import { getAuthAdmin } from '@/lib/supabase/helpers';
 
 export async function GET(req: NextRequest) {
   try {
-    const authHeader = req.headers.get('Authorization');
-    if (!authHeader?.startsWith('Bearer ')) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
-
-    const token = authHeader.split(' ')[1];
-    const payload = verifyToken(token);
-    if (!payload) {
-      return NextResponse.json({ error: 'Invalid or expired token' }, { status: 401 });
-    }
-
-    const admin = await db.user.findUnique({ where: { id: payload.userId } });
-    if (!admin || admin.role !== 'admin') {
+    const auth = await getAuthAdmin();
+    if (!auth) {
       return NextResponse.json({ error: 'Admin access required' }, { status: 403 });
     }
 
@@ -26,45 +15,46 @@ export async function GET(req: NextRequest) {
     const page = Number(searchParams.get('page')) || 1;
     const limit = Number(searchParams.get('limit')) || 20;
 
-    const where: Record<string, unknown> = {};
+    let query = supabaseAdmin
+      .from('profiles')
+      .select('*, wallets(id, type, balance)', { count: 'exact' });
 
     if (search) {
-      where.OR = [
-        { fullName: { contains: search } },
-        { username: { contains: search } },
-        { email: { contains: search } },
-        { phone: { contains: search } },
-      ];
+      query = query.or(`full_name.ilike.%${search}%,username.ilike.%${search}%,phone.ilike.%${search}%`);
     }
 
     if (status === 'activated') {
-      where.isActivated = true;
+      query = query.eq('is_activated', true);
     } else if (status === 'pending') {
-      where.isActivated = false;
+      query = query.eq('is_activated', false);
     }
 
-    const [users, total] = await Promise.all([
-      db.user.findMany({
-        where,
-        select: {
-          id: true,
-          fullName: true,
-          username: true,
-          email: true,
-          phone: true,
-          role: true,
-          isActivated: true,
-          activatedAt: true,
-          referralCode: true,
-          createdAt: true,
-          updatedAt: true,
-        },
-        orderBy: { createdAt: 'desc' },
-        skip: (page - 1) * limit,
-        take: limit,
-      }),
-      db.user.count({ where }),
-    ]);
+    const { data: rows, count, error } = await query
+      .order('created_at', { ascending: false })
+      .range((page - 1) * limit, page * limit - 1);
+
+    if (error) throw error;
+
+    const total = count || 0;
+
+    // Map to camelCase response matching old Prisma shape
+    const users = (rows || []).map((row: Record<string, unknown>) => ({
+      id: row.id,
+      fullName: row.full_name,
+      username: row.username,
+      email: '', // email is in auth.users, not profiles
+      phone: row.phone,
+      role: row.role,
+      isActivated: row.is_activated,
+      activatedAt: row.activated_at,
+      referralCode: row.referral_code,
+      profilePicture: row.profile_picture,
+      bankName: row.bank_name,
+      bankAccount: row.bank_account,
+      bankAccountName: row.bank_account_name,
+      createdAt: row.created_at,
+      updatedAt: row.updated_at,
+    }));
 
     return NextResponse.json({
       users,
@@ -84,19 +74,8 @@ export async function GET(req: NextRequest) {
 
 export async function PUT(req: NextRequest) {
   try {
-    const authHeader = req.headers.get('Authorization');
-    if (!authHeader?.startsWith('Bearer ')) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
-
-    const token = authHeader.split(' ')[1];
-    const payload = verifyToken(token);
-    if (!payload) {
-      return NextResponse.json({ error: 'Invalid or expired token' }, { status: 401 });
-    }
-
-    const admin = await db.user.findUnique({ where: { id: payload.userId } });
-    if (!admin || admin.role !== 'admin') {
+    const auth = await getAuthAdmin();
+    if (!auth) {
       return NextResponse.json({ error: 'Admin access required' }, { status: 403 });
     }
 
@@ -105,56 +84,97 @@ export async function PUT(req: NextRequest) {
       return NextResponse.json({ error: 'User ID and action are required' }, { status: 400 });
     }
 
-    const targetUser = await db.user.findUnique({ where: { id: userId } });
+    const { data: targetUser } = await supabaseAdmin
+      .from('profiles')
+      .select('*')
+      .eq('id', userId)
+      .single();
+
     if (!targetUser) {
       return NextResponse.json({ error: 'User not found' }, { status: 404 });
     }
 
-    let updatedUser;
-
     if (action === 'activate') {
-      updatedUser = await db.user.update({
-        where: { id: userId },
-        data: { isActivated: true, activatedAt: new Date() },
+      const { data, error } = await supabaseAdmin
+        .from('profiles')
+        .update({ is_activated: true, activated_at: new Date().toISOString() })
+        .eq('id', userId)
+        .select()
+        .single();
+
+      if (error) throw error;
+
+      await supabaseAdmin.from('audit_logs').insert({
+        user_id: auth.user.id,
+        action: 'ADMIN_ACTIVATE_USER',
+        details: `activate user ${targetUser.username}`,
+      });
+
+      return NextResponse.json({
+        user: {
+          id: data.id,
+          fullName: data.full_name,
+          username: data.username,
+          phone: data.phone,
+          role: data.role,
+          isActivated: data.is_activated,
+          activatedAt: data.activated_at,
+          referralCode: data.referral_code,
+          createdAt: data.created_at,
+          updatedAt: data.updated_at,
+        },
+        message: 'User activated successfully',
       });
     } else if (action === 'suspend') {
-      updatedUser = await db.user.update({
-        where: { id: userId },
-        data: { isActivated: false },
+      const { data, error } = await supabaseAdmin
+        .from('profiles')
+        .update({ is_activated: false })
+        .eq('id', userId)
+        .select()
+        .single();
+
+      if (error) throw error;
+
+      await supabaseAdmin.from('audit_logs').insert({
+        user_id: auth.user.id,
+        action: 'ADMIN_SUSPEND_USER',
+        details: `suspend user ${targetUser.username}`,
+      });
+
+      return NextResponse.json({
+        user: {
+          id: data.id,
+          fullName: data.full_name,
+          username: data.username,
+          phone: data.phone,
+          role: data.role,
+          isActivated: data.is_activated,
+          activatedAt: data.activated_at,
+          referralCode: data.referral_code,
+          createdAt: data.created_at,
+          updatedAt: data.updated_at,
+        },
+        message: 'User suspended successfully',
       });
     } else if (action === 'delete') {
-      // Delete related records first
-      await db.notification.deleteMany({ where: { userId } });
-      await db.adView.deleteMany({ where: { userId } });
-      await db.taskSubmission.deleteMany({ where: { userId } });
-      await db.withdrawal.deleteMany({ where: { userId } });
-      await db.trade.deleteMany({ where: { userId } });
-      await db.wallet.deleteMany({ where: { userId } });
-      await db.user.delete({ where: { id: userId } });
+      // Delete the auth user — ON DELETE CASCADE on profiles handles related records
+      const { error } = await supabaseAdmin.auth.admin.deleteUser(userId);
 
-      await db.auditLog.create({
-        data: {
-          userId: payload.userId,
-          action: 'DELETE_USER',
-          details: `Deleted user ${targetUser.username} (${targetUser.email})`,
-        },
+      if (error) throw error;
+
+      await supabaseAdmin.from('audit_logs').insert({
+        user_id: auth.user.id,
+        action: 'DELETE_USER',
+        details: `Deleted user ${targetUser.username}`,
       });
 
       return NextResponse.json({ message: 'User deleted successfully' });
     } else {
-      return NextResponse.json({ error: 'Invalid action. Use activate, suspend, or delete' }, { status: 400 });
+      return NextResponse.json(
+        { error: 'Invalid action. Use activate, suspend, or delete' },
+        { status: 400 }
+      );
     }
-
-    await db.auditLog.create({
-      data: {
-        userId: payload.userId,
-        action: `ADMIN_${action.toUpperCase()}_USER`,
-        details: `${action} user ${targetUser.username} (${targetUser.email})`,
-      },
-    });
-
-    const { password: _, ...userWithoutPassword } = updatedUser!;
-    return NextResponse.json({ user: userWithoutPassword, message: `User ${action}d successfully` });
   } catch (error: unknown) {
     console.error('Admin edit user error:', error);
     const message = error instanceof Error ? error.message : 'Failed to edit user';

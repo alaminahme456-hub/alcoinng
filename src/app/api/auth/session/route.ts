@@ -1,46 +1,44 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { db } from '@/lib/db';
-import { verifyToken } from '@/lib/auth';
+import { createClient } from '@/lib/supabase/server';
+import { supabaseAdmin } from '@/lib/supabase/admin';
 
 export async function GET(req: NextRequest) {
   try {
-    const authHeader = req.headers.get('Authorization');
-    if (!authHeader?.startsWith('Bearer ')) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
+    const supabase = await createClient();
+    const { data: { user }, error } = await supabase.auth.getUser();
 
-    const token = authHeader.split(' ')[1];
-    const payload = verifyToken(token);
-    if (!payload) {
+    if (error || !user) {
       return NextResponse.json({ error: 'Invalid or expired token' }, { status: 401 });
     }
 
-    const user = await db.user.findUnique({
-      where: { id: payload.userId },
-      select: {
-        id: true,
-        fullName: true,
-        username: true,
-        email: true,
-        phone: true,
-        role: true,
-        isActivated: true,
-        activatedAt: true,
-        referralCode: true,
-        profilePicture: true,
-        bankName: true,
-        bankAccount: true,
-        bankAccountName: true,
-        createdAt: true,
-        updatedAt: true,
-      },
-    });
+    const { data: profile } = await supabaseAdmin
+      .from('profiles')
+      .select('*')
+      .eq('id', user.id)
+      .single();
 
-    if (!user) {
+    if (!profile) {
       return NextResponse.json({ error: 'User not found' }, { status: 404 });
     }
 
-    return NextResponse.json({ user });
+    const userData = {
+      id: profile.id,
+      fullName: profile.full_name,
+      username: profile.username,
+      email: user.email!,
+      phone: profile.phone,
+      role: profile.role,
+      isActivated: profile.is_activated,
+      activatedAt: profile.activated_at,
+      referralCode: profile.referral_code,
+      profilePicture: profile.profile_picture,
+      bankName: profile.bank_name,
+      bankAccount: profile.bank_account,
+      bankAccountName: profile.bank_account_name,
+      createdAt: profile.created_at,
+    };
+
+    return NextResponse.json({ user: userData });
   } catch (error: unknown) {
     console.error('Session error:', error);
     const message = error instanceof Error ? error.message : 'Session check failed';

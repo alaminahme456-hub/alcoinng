@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { createClient } from '@/lib/supabase/client';
 
 export type ViewName = 
   | 'login' | 'register'

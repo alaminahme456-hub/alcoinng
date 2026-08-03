@@ -1,15 +1,16 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { db } from '@/lib/db';
-import { verifyToken } from '@/lib/auth';
+import { getAuthAdmin } from '@/lib/supabase/helpers';
+import { supabaseAdmin } from '@/lib/supabase/admin';
 
 export async function GET() {
   try {
-    const ads = await db.ad.findMany({
-      where: { isActive: true },
-      orderBy: { createdAt: 'desc' },
-    });
+    const { data: ads } = await supabaseAdmin
+      .from('ads')
+      .select('*')
+      .eq('is_active', true)
+      .order('created_at', { ascending: false });
 
-    return NextResponse.json({ ads });
+    return NextResponse.json({ ads: ads || [] });
   } catch (error: unknown) {
     console.error('Fetch ads error:', error);
     const message = error instanceof Error ? error.message : 'Failed to fetch ads';
@@ -19,31 +20,19 @@ export async function GET() {
 
 export async function POST(req: NextRequest) {
   try {
-    const authHeader = req.headers.get('Authorization');
-    if (!authHeader?.startsWith('Bearer ')) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
-
-    const token = authHeader.split(' ')[1];
-    const payload = verifyToken(token);
-    if (!payload) {
-      return NextResponse.json({ error: 'Invalid or expired token' }, { status: 401 });
-    }
-
-    const user = await db.user.findUnique({ where: { id: payload.userId } });
-    if (!user || user.role !== 'admin') {
-      return NextResponse.json({ error: 'Admin access required' }, { status: 403 });
-    }
+    const auth = await getAuthAdmin();
+    if (!auth) return NextResponse.json({ error: 'Admin access required' }, { status: 403 });
 
     const { title, thumbnail, duration, reward } = await req.json();
-
     if (!title || !thumbnail || !duration || !reward) {
       return NextResponse.json({ error: 'All fields are required' }, { status: 400 });
     }
 
-    const ad = await db.ad.create({
-      data: { title, thumbnail, duration: Number(duration), reward: Number(reward) },
-    });
+    const { data: ad } = await supabaseAdmin
+      .from('ads')
+      .insert({ title, thumbnail, duration: Number(duration), reward: Number(reward) })
+      .select()
+      .single();
 
     return NextResponse.json({ ad }, { status: 201 });
   } catch (error: unknown) {

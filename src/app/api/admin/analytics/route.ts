@@ -1,107 +1,148 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { db } from '@/lib/db';
-import { verifyToken } from '@/lib/auth';
+import { supabaseAdmin } from '@/lib/supabase/admin';
+import { getAuthAdmin } from '@/lib/supabase/helpers';
 
 export async function GET(req: NextRequest) {
   try {
-    const authHeader = req.headers.get('Authorization');
-    if (!authHeader?.startsWith('Bearer ')) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
-
-    const token = authHeader.split(' ')[1];
-    const payload = verifyToken(token);
-    if (!payload) {
-      return NextResponse.json({ error: 'Invalid or expired token' }, { status: 401 });
-    }
-
-    const admin = await db.user.findUnique({ where: { id: payload.userId } });
-    if (!admin || admin.role !== 'admin') {
+    const auth = await getAuthAdmin();
+    if (!auth) {
       return NextResponse.json({ error: 'Admin access required' }, { status: 403 });
     }
 
-    // Core stats
-    const [totalUsers, activatedUsers, pendingActivations, activeTasks, activeAds] =
-      await Promise.all([
-        db.user.count(),
-        db.user.count({ where: { isActivated: true } }),
-        db.user.count({ where: { isActivated: false } }),
-        db.task.count({ where: { isActive: true } }),
-        db.ad.count({ where: { isActive: true } }),
-      ]);
+    // Core counts in parallel
+    const [
+      totalUsersRes,
+      activatedUsersRes,
+      pendingActivationsRes,
+      activeTasksRes,
+      activeAdsRes,
+    ] = await Promise.all([
+      supabaseAdmin.from('profiles').select('*', { count: 'exact', head: true }),
+      supabaseAdmin.from('profiles').select('*', { count: 'exact', head: true }).eq('is_activated', true),
+      supabaseAdmin.from('profiles').select('*', { count: 'exact', head: true }).eq('is_activated', false),
+      supabaseAdmin.from('tasks').select('*', { count: 'exact', head: true }).eq('is_active', true),
+      supabaseAdmin.from('ads').select('*', { count: 'exact', head: true }).eq('is_active', true),
+    ]);
+
+    const totalUsers = totalUsersRes.count || 0;
+    const activatedUsers = activatedUsersRes.count || 0;
+    const pendingActivations = pendingActivationsRes.count || 0;
+    const activeTasks = activeTasksRes.count || 0;
+    const activeAds = activeAdsRes.count || 0;
 
     // Wallet totals
-    const rewardBalance = await db.wallet.aggregate({
-      where: { type: 'reward' },
-      _sum: { balance: true },
-    });
-    const depositBalance = await db.wallet.aggregate({
-      where: { type: 'deposit' },
-      _sum: { balance: true },
-    });
-    const profitBalance = await db.wallet.aggregate({
-      where: { type: 'profit' },
-      _sum: { balance: true },
-    });
+    const [rewardRes, depositRes, profitRes] = await Promise.all([
+      supabaseAdmin.from('wallets').select('balance').eq('type', 'reward'),
+      supabaseAdmin.from('wallets').select('balance').eq('type', 'deposit'),
+      supabaseAdmin.from('wallets').select('balance').eq('type', 'profit'),
+    ]);
+
+    const rewardBalance = (rewardRes.data || []).reduce(
+      (sum: number, r: Record<string, unknown>) => sum + Number(r.balance),
+      0
+    );
+    const depositBalance = (depositRes.data || []).reduce(
+      (sum: number, r: Record<string, unknown>) => sum + Number(r.balance),
+      0
+    );
+    const profitBalance = (profitRes.data || []).reduce(
+      (sum: number, r: Record<string, unknown>) => sum + Number(r.balance),
+      0
+    );
 
     // Total deposits (from used deposit codes)
-    const totalDeposits = await db.depositCode.aggregate({
-      where: { status: 'used' },
-      _sum: { amount: true },
-    });
+    const { data: usedDepositCodesData } = await supabaseAdmin
+      .from('deposit_codes')
+      .select('amount')
+      .eq('status', 'used');
+
+    const totalDeposits = (usedDepositCodesData || []).reduce(
+      (sum: number, r: Record<string, unknown>) => sum + Number(r.amount),
+      0
+    );
 
     // Withdrawal stats
-    const totalWithdrawals = await db.withdrawal.aggregate({
-      where: { status: 'paid' },
-      _sum: { amount: true },
-    });
-    const pendingWithdrawals = await db.withdrawal.aggregate({
-      where: { status: 'pending' },
-      _sum: { amount: true },
-    });
-    const pendingWithdrawalCount = await db.withdrawal.count({
-      where: { status: 'pending' },
-    });
+    const [paidWithdrawalsRes, pendingWithdrawalsRes, pendingWithdrawalCountRes] =
+      await Promise.all([
+        supabaseAdmin.from('withdrawals').select('amount').eq('status', 'paid'),
+        supabaseAdmin.from('withdrawals').select('amount').eq('status', 'pending'),
+        supabaseAdmin.from('withdrawals').select('*', { count: 'exact', head: true }).eq('status', 'pending'),
+      ]);
+
+    const totalPaid = (paidWithdrawalsRes.data || []).reduce(
+      (sum: number, r: Record<string, unknown>) => sum + Number(r.amount),
+      0
+    );
+    const pendingAmount = (pendingWithdrawalsRes.data || []).reduce(
+      (sum: number, r: Record<string, unknown>) => sum + Number(r.amount),
+      0
+    );
+    const pendingCount = pendingWithdrawalCountRes.count || 0;
 
     // Trade stats
-    const totalTrades = await db.trade.count();
-    const winningTrades = await db.trade.count({ where: { result: 'win' } });
-    const losingTrades = await db.trade.count({ where: { result: 'loss' } });
-    const totalStaked = await db.trade.aggregate({
-      _sum: { amount: true },
-    });
-    const totalProfitPaid = await db.trade.aggregate({
-      where: { result: 'win' },
-      _sum: { profit: true },
-    });
+    const [
+      totalTradesRes,
+      winningTradesRes,
+      losingTradesRes,
+      allTradesAmountRes,
+      winningTradesProfitRes,
+    ] = await Promise.all([
+      supabaseAdmin.from('trades').select('*', { count: 'exact', head: true }),
+      supabaseAdmin.from('trades').select('*', { count: 'exact', head: true }).eq('result', 'win'),
+      supabaseAdmin.from('trades').select('*', { count: 'exact', head: true }).eq('result', 'loss'),
+      supabaseAdmin.from('trades').select('amount'),
+      supabaseAdmin.from('trades').select('profit').eq('result', 'win'),
+    ]);
 
-    // Daily registrations for last 30 days
-    const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
-    const dailyRegistrations = await db.user.groupBy({
-      by: ['createdAt'],
-      where: { createdAt: { gte: thirtyDaysAgo } },
-      _count: { id: true },
-    });
+    const totalTrades = totalTradesRes.count || 0;
+    const winningTrades = winningTradesRes.count || 0;
+    const losingTrades = losingTradesRes.count || 0;
+    const totalStaked = (allTradesAmountRes.data || []).reduce(
+      (sum: number, r: Record<string, unknown>) => sum + Number(r.amount),
+      0
+    );
+    const totalProfitPaid = (winningTradesProfitRes.data || []).reduce(
+      (sum: number, r: Record<string, unknown>) => sum + Number(r.profit),
+      0
+    );
 
-    // Group by date
+    // Daily registrations for last 30 days — fetch all and group in JS
+    const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
+    const { data: recentUsers } = await supabaseAdmin
+      .from('profiles')
+      .select('created_at')
+      .gte('created_at', thirtyDaysAgo);
+
     const registrationByDate: Record<string, number> = {};
-    for (const reg of dailyRegistrations) {
-      const dateKey = reg.createdAt.toISOString().split('T')[0];
-      registrationByDate[dateKey] = (registrationByDate[dateKey] || 0) + reg._count.id;
+    for (const u of recentUsers || []) {
+      const row = u as Record<string, unknown>;
+      const dateKey = new Date(row.created_at as string).toISOString().split('T')[0];
+      registrationByDate[dateKey] = (registrationByDate[dateKey] || 0) + 1;
     }
 
     // Pending task submissions
-    const pendingSubmissions = await db.taskSubmission.count({
-      where: { status: 'pending' },
-    });
+    const { count: pendingSubmissions } = await supabaseAdmin
+      .from('task_submissions')
+      .select('*', { count: 'exact', head: true })
+      .eq('status', 'pending');
 
     // Activation codes stats
-    const unusedCodes = await db.activationCode.count({ where: { status: 'unused' } });
-    const usedCodes = await db.activationCode.count({ where: { status: 'used' } });
+    const [unusedCodesRes, usedCodesRes] = await Promise.all([
+      supabaseAdmin.from('activation_codes').select('*', { count: 'exact', head: true }).eq('status', 'unused'),
+      supabaseAdmin.from('activation_codes').select('*', { count: 'exact', head: true }).eq('status', 'used'),
+    ]);
+
+    const unusedCodes = unusedCodesRes.count || 0;
+    const usedCodes = usedCodesRes.count || 0;
 
     // Deposit codes stats
-    const unusedDepositCodes = await db.depositCode.count({ where: { status: 'unused' } });
-    const usedDepositCodes = await db.depositCode.count({ where: { status: 'used' } });
+    const [unusedDepositCodesRes, usedDepositCodesRes] = await Promise.all([
+      supabaseAdmin.from('deposit_codes').select('*', { count: 'exact', head: true }).eq('status', 'unused'),
+      supabaseAdmin.from('deposit_codes').select('*', { count: 'exact', head: true }).eq('status', 'used'),
+    ]);
+
+    const unusedDepositCodes = unusedDepositCodesRes.count || 0;
+    const usedDepositCodes = usedDepositCodesRes.count || 0;
 
     return NextResponse.json({
       users: {
@@ -110,7 +151,7 @@ export async function GET(req: NextRequest) {
         pendingActivation: pendingActivations,
       },
       deposits: {
-        total: totalDeposits._sum.amount || 0,
+        total: totalDeposits,
         unusedCodes,
         usedCodes,
       },
@@ -119,25 +160,25 @@ export async function GET(req: NextRequest) {
         used: usedDepositCodes,
       },
       withdrawals: {
-        totalPaid: totalWithdrawals._sum.amount || 0,
-        pendingAmount: pendingWithdrawals._sum.amount || 0,
-        pendingCount: pendingWithdrawalCount,
+        totalPaid,
+        pendingAmount,
+        pendingCount,
       },
       wallets: {
-        rewardBalance: rewardBalance._sum.balance || 0,
-        depositBalance: depositBalance._sum.balance || 0,
-        profitBalance: profitBalance._sum.balance || 0,
+        rewardBalance,
+        depositBalance,
+        profitBalance,
       },
       trades: {
         total: totalTrades,
         wins: winningTrades,
         losses: losingTrades,
-        totalStaked: totalStaked._sum.amount || 0,
-        totalProfitPaid: totalProfitPaid._sum.profit || 0,
+        totalStaked,
+        totalProfitPaid,
       },
       tasks: {
         active: activeTasks,
-        pendingSubmissions,
+        pendingSubmissions: pendingSubmissions || 0,
       },
       ads: {
         active: activeAds,

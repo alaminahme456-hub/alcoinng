@@ -1,35 +1,27 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { db } from '@/lib/db';
-import { verifyToken } from '@/lib/auth';
+import { getAuthUser } from '@/lib/supabase/helpers';
+import { supabaseAdmin } from '@/lib/supabase/admin';
 
 export async function POST(req: NextRequest) {
   try {
-    const authHeader = req.headers.get('Authorization');
-    if (!authHeader?.startsWith('Bearer ')) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
-
-    const token = authHeader.split(' ')[1];
-    const payload = verifyToken(token);
-    if (!payload) {
-      return NextResponse.json({ error: 'Invalid or expired token' }, { status: 401 });
-    }
+    const auth = await getAuthUser();
+    if (!auth) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
     const { code } = await req.json();
     if (!code) {
       return NextResponse.json({ error: 'Activation code is required' }, { status: 400 });
     }
 
-    const user = await db.user.findUnique({ where: { id: payload.userId } });
-    if (!user) {
-      return NextResponse.json({ error: 'User not found' }, { status: 404 });
-    }
-
-    if (user.isActivated) {
+    if (auth.profile.is_activated) {
       return NextResponse.json({ error: 'Account is already activated' }, { status: 400 });
     }
 
-    const activationCode = await db.activationCode.findUnique({ where: { code: code.toUpperCase() } });
+    const { data: activationCode } = await supabaseAdmin
+      .from('activation_codes')
+      .select('*')
+      .eq('code', code.toUpperCase())
+      .single();
+
     if (!activationCode) {
       return NextResponse.json({ error: 'Invalid activation code' }, { status: 404 });
     }
@@ -38,33 +30,25 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Activation code has already been used' }, { status: 400 });
     }
 
-    const now = new Date();
+    const now = new Date().toISOString();
 
-    await db.$transaction([
-      db.user.update({
-        where: { id: user.id },
-        data: {
-          isActivated: true,
-          activatedAt: now,
-          activationCodeId: activationCode.id,
-        },
-      }),
-      db.activationCode.update({
-        where: { id: activationCode.id },
-        data: {
-          status: 'used',
-          redeemedBy: user.id,
-          redeemedAt: now,
-        },
-      }),
-    ]);
+    // Update profile and code in a single RPC-like flow
+    await supabaseAdmin.from('profiles').update({
+      is_activated: true,
+      activated_at: now,
+      activation_code_id: activationCode.id,
+    }).eq('id', auth.user.id);
 
-    await db.auditLog.create({
-      data: {
-        userId: user.id,
-        action: 'ACTIVATE_ACCOUNT',
-        details: `Activated with code ${activationCode.code}`,
-      },
+    await supabaseAdmin.from('activation_codes').update({
+      status: 'used',
+      redeemed_by: auth.user.id,
+      redeemed_at: now,
+    }).eq('id', activationCode.id);
+
+    await supabaseAdmin.from('audit_logs').insert({
+      user_id: auth.user.id,
+      action: 'ACTIVATE_ACCOUNT',
+      details: `Activated with code ${activationCode.code}`,
     });
 
     return NextResponse.json({ message: 'Account activated successfully' });

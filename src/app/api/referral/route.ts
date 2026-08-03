@@ -1,51 +1,34 @@
-import { NextRequest, NextResponse } from 'next/server';
-import { db } from '@/lib/db';
-import { verifyToken } from '@/lib/auth';
+import { NextResponse } from 'next/server';
+import { getAuthUser } from '@/lib/supabase/helpers';
+import { supabaseAdmin } from '@/lib/supabase/admin';
 
-export async function GET(req: NextRequest) {
+export async function GET() {
   try {
-    const authHeader = req.headers.get('Authorization');
-    if (!authHeader?.startsWith('Bearer ')) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
+    const auth = await getAuthUser();
+    if (!auth) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
-    const token = authHeader.split(' ')[1];
-    const payload = verifyToken(token);
-    if (!payload) {
-      return NextResponse.json({ error: 'Invalid or expired token' }, { status: 401 });
-    }
+    const { data: referrals } = await supabaseAdmin
+      .from('profiles')
+      .select('id, full_name, username, is_activated, created_at')
+      .eq('referred_by', auth.user.id)
+      .order('created_at', { ascending: false });
 
-    const user = await db.user.findUnique({ where: { id: payload.userId } });
-    if (!user) {
-      return NextResponse.json({ error: 'User not found' }, { status: 404 });
-    }
-
-    const referrals = await db.user.findMany({
-      where: { referredBy: user.id },
-      select: {
-        id: true,
-        fullName: true,
-        username: true,
-        isActivated: true,
-        createdAt: true,
-      },
-      orderBy: { createdAt: 'desc' },
-    });
-
-    const totalReferrals = referrals.length;
-    const activeReferrals = referrals.filter((r) => r.isActivated).length;
-
-    // Calculate referral earnings (from trades made by referrals - simplified)
-    // In a real system, this would track referral commissions
-    const referralEarnings = 0;
+    const totalReferrals = (referrals || []).length;
+    const activeReferrals = (referrals || []).filter((r) => r.is_activated).length;
 
     return NextResponse.json({
-      referralCode: user.referralCode,
-      referralLink: `${process.env.NEXT_PUBLIC_APP_URL || ''}/register?ref=${user.referralCode}`,
+      referralCode: auth.profile.referral_code,
+      referralLink: `${process.env.NEXT_PUBLIC_APP_URL || ''}/register?ref=${auth.profile.referral_code}`,
       totalReferrals,
       activeReferrals,
-      referralEarnings,
-      referrals,
+      referralEarnings: 0,
+      referrals: (referrals || []).map(r => ({
+        id: r.id,
+        fullName: r.full_name,
+        username: r.username,
+        isActivated: r.is_activated,
+        createdAt: r.created_at,
+      })),
     });
   } catch (error: unknown) {
     console.error('Referral error:', error);

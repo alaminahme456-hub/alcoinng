@@ -1,15 +1,16 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { db } from '@/lib/db';
-import { verifyToken } from '@/lib/auth';
+import { getAuthAdmin } from '@/lib/supabase/helpers';
+import { supabaseAdmin } from '@/lib/supabase/admin';
 
 export async function GET() {
   try {
-    const tasks = await db.task.findMany({
-      where: { isActive: true },
-      orderBy: { createdAt: 'desc' },
-    });
+    const { data: tasks } = await supabaseAdmin
+      .from('tasks')
+      .select('*')
+      .eq('is_active', true)
+      .order('created_at', { ascending: false });
 
-    return NextResponse.json({ tasks });
+    return NextResponse.json({ tasks: tasks || [] });
   } catch (error: unknown) {
     console.error('Fetch tasks error:', error);
     const message = error instanceof Error ? error.message : 'Failed to fetch tasks';
@@ -19,36 +20,24 @@ export async function GET() {
 
 export async function POST(req: NextRequest) {
   try {
-    const authHeader = req.headers.get('Authorization');
-    if (!authHeader?.startsWith('Bearer ')) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
-
-    const token = authHeader.split(' ')[1];
-    const payload = verifyToken(token);
-    if (!payload) {
-      return NextResponse.json({ error: 'Invalid or expired token' }, { status: 401 });
-    }
-
-    const user = await db.user.findUnique({ where: { id: payload.userId } });
-    if (!user || user.role !== 'admin') {
-      return NextResponse.json({ error: 'Admin access required' }, { status: 403 });
-    }
+    const auth = await getAuthAdmin();
+    if (!auth) return NextResponse.json({ error: 'Admin access required' }, { status: 403 });
 
     const { title, instructions, reward, requiresProof } = await req.json();
-
     if (!title || !instructions || !reward) {
       return NextResponse.json({ error: 'All fields are required' }, { status: 400 });
     }
 
-    const task = await db.task.create({
-      data: {
+    const { data: task } = await supabaseAdmin
+      .from('tasks')
+      .insert({
         title,
         instructions,
         reward: Number(reward),
-        requiresProof: Boolean(requiresProof),
-      },
-    });
+        requires_proof: Boolean(requiresProof),
+      })
+      .select()
+      .single();
 
     return NextResponse.json({ task }, { status: 201 });
   } catch (error: unknown) {

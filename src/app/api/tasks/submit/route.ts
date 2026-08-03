@@ -1,67 +1,61 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { db } from '@/lib/db';
-import { verifyToken } from '@/lib/auth';
+import { getAuthUser } from '@/lib/supabase/helpers';
+import { supabaseAdmin } from '@/lib/supabase/admin';
 
 export async function POST(req: NextRequest) {
   try {
-    const authHeader = req.headers.get('Authorization');
-    if (!authHeader?.startsWith('Bearer ')) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
-
-    const token = authHeader.split(' ')[1];
-    const payload = verifyToken(token);
-    if (!payload) {
-      return NextResponse.json({ error: 'Invalid or expired token' }, { status: 401 });
-    }
+    const auth = await getAuthUser();
+    if (!auth) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
     const { taskId, proof } = await req.json();
     if (!taskId) {
       return NextResponse.json({ error: 'Task ID is required' }, { status: 400 });
     }
 
-    const user = await db.user.findUnique({ where: { id: payload.userId } });
-    if (!user) {
-      return NextResponse.json({ error: 'User not found' }, { status: 404 });
-    }
-
-    if (!user.isActivated) {
+    if (!auth.profile.is_activated) {
       return NextResponse.json({ error: 'Account must be activated' }, { status: 403 });
     }
 
-    const task = await db.task.findUnique({ where: { id: taskId } });
-    if (!task || !task.isActive) {
+    const { data: task } = await supabaseAdmin
+      .from('tasks')
+      .select('*')
+      .eq('id', taskId)
+      .single();
+    if (!task || !task.is_active) {
       return NextResponse.json({ error: 'Task not found or inactive' }, { status: 404 });
     }
 
-    if (task.requiresProof && !proof) {
+    if (task.requires_proof && !proof) {
       return NextResponse.json({ error: 'Proof is required for this task' }, { status: 400 });
     }
 
     // Check for existing submission
-    const existingSubmission = await db.taskSubmission.findFirst({
-      where: { userId: user.id, taskId },
-    });
+    const { data: existingSubmission } = await supabaseAdmin
+      .from('task_submissions')
+      .select('id')
+      .eq('user_id', auth.user.id)
+      .eq('task_id', taskId)
+      .single();
 
     if (existingSubmission) {
       return NextResponse.json({ error: 'Already submitted this task' }, { status: 400 });
     }
 
-    const submission = await db.taskSubmission.create({
-      data: {
-        userId: user.id,
-        taskId,
+    const { data: submission } = await supabaseAdmin
+      .from('task_submissions')
+      .insert({
+        user_id: auth.user.id,
+        task_id: taskId,
         proof: proof || null,
-      },
-    });
+      })
+      .select()
+      .single();
 
-    await db.notification.create({
-      data: {
-        userId: user.id,
-        title: 'Task Submitted',
-        message: `Your submission for '${task.title}' is pending review.`,
-        type: 'task',
-      },
+    await supabaseAdmin.from('notifications').insert({
+      user_id: auth.user.id,
+      title: 'Task Submitted',
+      message: `Your submission for '${task.title}' is pending review.`,
+      type: 'task',
     });
 
     return NextResponse.json({ submission, message: 'Task submitted successfully' }, { status: 201 });

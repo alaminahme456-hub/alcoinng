@@ -1,22 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { db } from '@/lib/db';
-import { verifyToken } from '@/lib/auth';
+import { supabaseAdmin } from '@/lib/supabase/admin';
+import { getAuthAdmin } from '@/lib/supabase/helpers';
 
 export async function GET(req: NextRequest) {
   try {
-    const authHeader = req.headers.get('Authorization');
-    if (!authHeader?.startsWith('Bearer ')) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
-
-    const token = authHeader.split(' ')[1];
-    const payload = verifyToken(token);
-    if (!payload) {
-      return NextResponse.json({ error: 'Invalid or expired token' }, { status: 401 });
-    }
-
-    const admin = await db.user.findUnique({ where: { id: payload.userId } });
-    if (!admin || admin.role !== 'admin') {
+    const auth = await getAuthAdmin();
+    if (!auth) {
       return NextResponse.json({ error: 'Admin access required' }, { status: 403 });
     }
 
@@ -24,14 +13,23 @@ export async function GET(req: NextRequest) {
     const page = Number(searchParams.get('page')) || 1;
     const limit = Number(searchParams.get('limit')) || 20;
 
-    const [announcements, total] = await Promise.all([
-      db.announcement.findMany({
-        orderBy: { createdAt: 'desc' },
-        skip: (page - 1) * limit,
-        take: limit,
-      }),
-      db.announcement.count(),
-    ]);
+    const { data, count, error } = await supabaseAdmin
+      .from('announcements')
+      .select('*', { count: 'exact' })
+      .order('created_at', { ascending: false })
+      .range((page - 1) * limit, page * limit - 1);
+
+    if (error) throw error;
+    const total = count || 0;
+
+    const announcements = (data || []).map((row: Record<string, unknown>) => ({
+      id: row.id,
+      title: row.title,
+      message: row.message,
+      isActive: row.is_active,
+      createdAt: row.created_at,
+      updatedAt: row.updated_at,
+    }));
 
     return NextResponse.json({
       announcements,
@@ -46,19 +44,8 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   try {
-    const authHeader = req.headers.get('Authorization');
-    if (!authHeader?.startsWith('Bearer ')) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
-
-    const token = authHeader.split(' ')[1];
-    const payload = verifyToken(token);
-    if (!payload) {
-      return NextResponse.json({ error: 'Invalid or expired token' }, { status: 401 });
-    }
-
-    const admin = await db.user.findUnique({ where: { id: payload.userId } });
-    if (!admin || admin.role !== 'admin') {
+    const auth = await getAuthAdmin();
+    if (!auth) {
       return NextResponse.json({ error: 'Admin access required' }, { status: 403 });
     }
 
@@ -67,17 +54,28 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Title and message are required' }, { status: 400 });
     }
 
-    const announcement = await db.announcement.create({
-      data: { title, message },
+    const { data, error } = await supabaseAdmin
+      .from('announcements')
+      .insert({ title, message })
+      .select()
+      .single();
+
+    if (error) throw error;
+
+    await supabaseAdmin.from('audit_logs').insert({
+      user_id: auth.user.id,
+      action: 'CREATE_ANNOUNCEMENT',
+      details: `Created announcement: ${title}`,
     });
 
-    await db.auditLog.create({
-      data: {
-        userId: payload.userId,
-        action: 'CREATE_ANNOUNCEMENT',
-        details: `Created announcement: ${title}`,
-      },
-    });
+    const announcement = {
+      id: data.id,
+      title: data.title,
+      message: data.message,
+      isActive: data.is_active,
+      createdAt: data.created_at,
+      updatedAt: data.updated_at,
+    };
 
     return NextResponse.json({ announcement, message: 'Announcement created' }, { status: 201 });
   } catch (error: unknown) {
@@ -89,19 +87,8 @@ export async function POST(req: NextRequest) {
 
 export async function PUT(req: NextRequest) {
   try {
-    const authHeader = req.headers.get('Authorization');
-    if (!authHeader?.startsWith('Bearer ')) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
-
-    const token = authHeader.split(' ')[1];
-    const payload = verifyToken(token);
-    if (!payload) {
-      return NextResponse.json({ error: 'Invalid or expired token' }, { status: 401 });
-    }
-
-    const admin = await db.user.findUnique({ where: { id: payload.userId } });
-    if (!admin || admin.role !== 'admin') {
+    const auth = await getAuthAdmin();
+    if (!auth) {
       return NextResponse.json({ error: 'Admin access required' }, { status: 403 });
     }
 
@@ -110,17 +97,38 @@ export async function PUT(req: NextRequest) {
       return NextResponse.json({ error: 'Announcement ID is required' }, { status: 400 });
     }
 
-    const announcement = await db.announcement.findUnique({ where: { id: announcementId } });
-    if (!announcement) {
+    const { data: existing, error: fetchError } = await supabaseAdmin
+      .from('announcements')
+      .select('*')
+      .eq('id', announcementId)
+      .single();
+
+    if (fetchError || !existing) {
       return NextResponse.json({ error: 'Announcement not found' }, { status: 404 });
     }
 
-    const updated = await db.announcement.update({
-      where: { id: announcementId },
-      data: { isActive: !announcement.isActive },
-    });
+    const { data, error } = await supabaseAdmin
+      .from('announcements')
+      .update({ is_active: !existing.is_active })
+      .eq('id', announcementId)
+      .select()
+      .single();
 
-    return NextResponse.json({ announcement: updated, message: `Announcement ${updated.isActive ? 'activated' : 'deactivated'}` });
+    if (error) throw error;
+
+    const announcement = {
+      id: data.id,
+      title: data.title,
+      message: data.message,
+      isActive: data.is_active,
+      createdAt: data.created_at,
+      updatedAt: data.updated_at,
+    };
+
+    return NextResponse.json({
+      announcement,
+      message: `Announcement ${data.is_active ? 'activated' : 'deactivated'}`,
+    });
   } catch (error: unknown) {
     console.error('Toggle announcement error:', error);
     const message = error instanceof Error ? error.message : 'Failed to toggle announcement';
@@ -130,19 +138,8 @@ export async function PUT(req: NextRequest) {
 
 export async function DELETE(req: NextRequest) {
   try {
-    const authHeader = req.headers.get('Authorization');
-    if (!authHeader?.startsWith('Bearer ')) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
-
-    const token = authHeader.split(' ')[1];
-    const payload = verifyToken(token);
-    if (!payload) {
-      return NextResponse.json({ error: 'Invalid or expired token' }, { status: 401 });
-    }
-
-    const admin = await db.user.findUnique({ where: { id: payload.userId } });
-    if (!admin || admin.role !== 'admin') {
+    const auth = await getAuthAdmin();
+    if (!auth) {
       return NextResponse.json({ error: 'Admin access required' }, { status: 403 });
     }
 
@@ -152,14 +149,17 @@ export async function DELETE(req: NextRequest) {
       return NextResponse.json({ error: 'Announcement ID is required' }, { status: 400 });
     }
 
-    await db.announcement.delete({ where: { id: announcementId } });
+    const { error } = await supabaseAdmin
+      .from('announcements')
+      .delete()
+      .eq('id', announcementId);
 
-    await db.auditLog.create({
-      data: {
-        userId: payload.userId,
-        action: 'DELETE_ANNOUNCEMENT',
-        details: `Deleted announcement ${announcementId}`,
-      },
+    if (error) throw error;
+
+    await supabaseAdmin.from('audit_logs').insert({
+      user_id: auth.user.id,
+      action: 'DELETE_ANNOUNCEMENT',
+      details: `Deleted announcement ${announcementId}`,
     });
 
     return NextResponse.json({ message: 'Announcement deleted successfully' });

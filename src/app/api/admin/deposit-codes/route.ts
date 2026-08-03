@@ -1,22 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { db } from '@/lib/db';
-import { verifyToken, generateCode } from '@/lib/auth';
+import { supabaseAdmin } from '@/lib/supabase/admin';
+import { getAuthAdmin } from '@/lib/supabase/helpers';
+import { generateCode } from '@/lib/auth';
 
 export async function GET(req: NextRequest) {
   try {
-    const authHeader = req.headers.get('Authorization');
-    if (!authHeader?.startsWith('Bearer ')) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
-
-    const token = authHeader.split(' ')[1];
-    const payload = verifyToken(token);
-    if (!payload) {
-      return NextResponse.json({ error: 'Invalid or expired token' }, { status: 401 });
-    }
-
-    const admin = await db.user.findUnique({ where: { id: payload.userId } });
-    if (!admin || admin.role !== 'admin') {
+    const auth = await getAuthAdmin();
+    if (!auth) {
       return NextResponse.json({ error: 'Admin access required' }, { status: 403 });
     }
 
@@ -25,20 +15,30 @@ export async function GET(req: NextRequest) {
     const page = Number(searchParams.get('page')) || 1;
     const limit = Number(searchParams.get('limit')) || 20;
 
-    const where: Record<string, unknown> = {};
+    let query = supabaseAdmin
+      .from('deposit_codes')
+      .select('*', { count: 'exact' });
+
     if (status && ['unused', 'used', 'disabled'].includes(status)) {
-      where.status = status;
+      query = query.eq('status', status);
     }
 
-    const [codes, total] = await Promise.all([
-      db.depositCode.findMany({
-        where,
-        orderBy: { generatedAt: 'desc' },
-        skip: (page - 1) * limit,
-        take: limit,
-      }),
-      db.depositCode.count({ where }),
-    ]);
+    const { data, count, error } = await query
+      .order('generated_at', { ascending: false })
+      .range((page - 1) * limit, page * limit - 1);
+
+    if (error) throw error;
+    const total = count || 0;
+
+    const codes = (data || []).map((row: Record<string, unknown>) => ({
+      id: row.id,
+      code: row.code,
+      amount: Number(row.amount),
+      status: row.status,
+      usedBy: row.used_by,
+      usedAt: row.used_at,
+      generatedAt: row.generated_at,
+    }));
 
     return NextResponse.json({
       codes,
@@ -53,19 +53,8 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   try {
-    const authHeader = req.headers.get('Authorization');
-    if (!authHeader?.startsWith('Bearer ')) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
-
-    const token = authHeader.split(' ')[1];
-    const payload = verifyToken(token);
-    if (!payload) {
-      return NextResponse.json({ error: 'Invalid or expired token' }, { status: 401 });
-    }
-
-    const admin = await db.user.findUnique({ where: { id: payload.userId } });
-    if (!admin || admin.role !== 'admin') {
+    const auth = await getAuthAdmin();
+    if (!auth) {
       return NextResponse.json({ error: 'Admin access required' }, { status: 403 });
     }
 
@@ -81,27 +70,48 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Count must be between 1 and 100' }, { status: 400 });
     }
 
-    const codes = [];
+    const inserts: Array<{ code: string; amount: number; status: string }> = [];
+
     for (let i = 0; i < numCount; i++) {
       let code = generateCode();
-      let exists = await db.depositCode.findUnique({ where: { code } });
-      while (exists) {
+      const { data: existing } = await supabaseAdmin
+        .from('deposit_codes')
+        .select('id')
+        .eq('code', code)
+        .single();
+      while (existing) {
         code = generateCode();
-        exists = await db.depositCode.findUnique({ where: { code } });
+        const check = await supabaseAdmin
+          .from('deposit_codes')
+          .select('id')
+          .eq('code', code)
+          .single();
+        if (!check.data) break;
       }
-
-      const created = await db.depositCode.create({
-        data: { code, amount: numAmount },
-      });
-      codes.push(created);
+      inserts.push({ code, amount: numAmount, status: 'unused' });
     }
 
-    await db.auditLog.create({
-      data: {
-        userId: payload.userId,
-        action: 'GENERATE_DEPOSIT_CODES',
-        details: `Generated ${numCount} deposit codes of ₦${numAmount.toLocaleString()} each`,
-      },
+    const { data, error } = await supabaseAdmin
+      .from('deposit_codes')
+      .insert(inserts)
+      .select();
+
+    if (error) throw error;
+
+    const codes = (data || []).map((row: Record<string, unknown>) => ({
+      id: row.id,
+      code: row.code,
+      amount: Number(row.amount),
+      status: row.status,
+      usedBy: row.used_by,
+      usedAt: row.used_at,
+      generatedAt: row.generated_at,
+    }));
+
+    await supabaseAdmin.from('audit_logs').insert({
+      user_id: auth.user.id,
+      action: 'GENERATE_DEPOSIT_CODES',
+      details: `Generated ${numCount} deposit codes of ₦${numAmount.toLocaleString()} each`,
     });
 
     return NextResponse.json({ codes, message: `${numCount} deposit code(s) generated` }, { status: 201 });
@@ -114,19 +124,8 @@ export async function POST(req: NextRequest) {
 
 export async function PUT(req: NextRequest) {
   try {
-    const authHeader = req.headers.get('Authorization');
-    if (!authHeader?.startsWith('Bearer ')) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
-
-    const token = authHeader.split(' ')[1];
-    const payload = verifyToken(token);
-    if (!payload) {
-      return NextResponse.json({ error: 'Invalid or expired token' }, { status: 401 });
-    }
-
-    const admin = await db.user.findUnique({ where: { id: payload.userId } });
-    if (!admin || admin.role !== 'admin') {
+    const auth = await getAuthAdmin();
+    if (!auth) {
       return NextResponse.json({ error: 'Admin access required' }, { status: 403 });
     }
 
@@ -135,8 +134,13 @@ export async function PUT(req: NextRequest) {
       return NextResponse.json({ error: 'Code ID and action are required' }, { status: 400 });
     }
 
-    const depositCode = await db.depositCode.findUnique({ where: { id: codeId } });
-    if (!depositCode) {
+    const { data: depositCode, error: fetchError } = await supabaseAdmin
+      .from('deposit_codes')
+      .select('*')
+      .eq('id', codeId)
+      .single();
+
+    if (fetchError || !depositCode) {
       return NextResponse.json({ error: 'Deposit code not found' }, { status: 404 });
     }
 
@@ -144,12 +148,28 @@ export async function PUT(req: NextRequest) {
       return NextResponse.json({ error: 'Cannot modify a used code' }, { status: 400 });
     }
 
-    const updated = await db.depositCode.update({
-      where: { id: codeId },
-      data: { status: action === 'disable' ? 'disabled' : 'unused' },
-    });
+    const newStatus = action === 'disable' ? 'disabled' : 'unused';
 
-    return NextResponse.json({ code: updated, message: `Code ${action}d successfully` });
+    const { data, error } = await supabaseAdmin
+      .from('deposit_codes')
+      .update({ status: newStatus })
+      .eq('id', codeId)
+      .select()
+      .single();
+
+    if (error) throw error;
+
+    const code = {
+      id: data.id,
+      code: data.code,
+      amount: Number(data.amount),
+      status: data.status,
+      usedBy: data.used_by,
+      usedAt: data.used_at,
+      generatedAt: data.generated_at,
+    };
+
+    return NextResponse.json({ code, message: `Code ${action}d successfully` });
   } catch (error: unknown) {
     console.error('Update deposit code error:', error);
     const message = error instanceof Error ? error.message : 'Failed to update code';

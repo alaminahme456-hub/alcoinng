@@ -1,28 +1,24 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { db } from '@/lib/db';
-import { verifyToken } from '@/lib/auth';
+import { getAuthUser } from '@/lib/supabase/helpers';
+import { supabaseAdmin } from '@/lib/supabase/admin';
 
 export const maxDuration = 60;
 
 function generateStartPrice(): number {
-  return Math.floor(Math.random() * 10000) / 100 + 1; // 1.00 to 101.00
+  return Math.floor(Math.random() * 10000) / 100 + 1;
 }
 
 function generateEndPrice(prediction: string): number {
-  // ~55% chance of being correct
   const isCorrect = Math.random() < 0.55;
-
-  const volatility = Math.random() * 20 + 5; // 5-25% change
+  const volatility = Math.random() * 20 + 5;
 
   if (isCorrect) {
-    // Price moves in favor of prediction
     if (prediction === 'buy') {
-      return Math.floor(Math.random() * volatility * 100 + 101) / 100; // 1.01 to volatility+1.01 (positive)
+      return Math.floor(Math.random() * volatility * 100 + 101) / 100;
     } else {
-      return -(Math.floor(Math.random() * volatility * 100 + 101) / 100); // negative
+      return -(Math.floor(Math.random() * volatility * 100 + 101) / 100);
     }
   } else {
-    // Price moves against prediction
     if (prediction === 'buy') {
       return -(Math.floor(Math.random() * volatility * 100 + 101) / 100);
     } else {
@@ -33,16 +29,8 @@ function generateEndPrice(prediction: string): number {
 
 export async function POST(req: NextRequest) {
   try {
-    const authHeader = req.headers.get('Authorization');
-    if (!authHeader?.startsWith('Bearer ')) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
-
-    const token = authHeader.split(' ')[1];
-    const payload = verifyToken(token);
-    if (!payload) {
-      return NextResponse.json({ error: 'Invalid or expired token' }, { status: 401 });
-    }
+    const auth = await getAuthUser();
+    if (!auth) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
     const { fundingWallet, prediction, amount, payoutMultiplier, duration } = await req.json();
 
@@ -66,56 +54,55 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Amount, multiplier and duration must be positive' }, { status: 400 });
     }
 
-    const user = await db.user.findUnique({ where: { id: payload.userId } });
-    if (!user) {
-      return NextResponse.json({ error: 'User not found' }, { status: 404 });
-    }
-
-    if (!user.isActivated) {
+    if (!auth.profile.is_activated) {
       return NextResponse.json({ error: 'Account must be activated' }, { status: 403 });
     }
 
     // Check wallet balance
-    const wallet = await db.wallet.findUnique({
-      where: { userId_type: { userId: user.id, type: fundingWallet } },
-    });
+    const { data: wallet } = await supabaseAdmin
+      .from('wallets')
+      .select('*')
+      .eq('user_id', auth.user.id)
+      .eq('type', fundingWallet)
+      .single();
 
-    if (!wallet || wallet.balance < numAmount) {
+    if (!wallet || Number(wallet.balance) < numAmount) {
       return NextResponse.json({ error: 'Insufficient balance' }, { status: 400 });
     }
 
     // Debit the wallet
-    await db.wallet.update({
-      where: { userId_type: { userId: user.id, type: fundingWallet } },
-      data: { balance: { decrement: numAmount } },
-    });
+    const newWalletBalance = Number(wallet.balance) - numAmount;
+    await supabaseAdmin
+      .from('wallets')
+      .update({ balance: newWalletBalance })
+      .eq('id', wallet.id);
 
     // Generate start price
     const startPrice = generateStartPrice();
 
     // Create trade record
-    const trade = await db.trade.create({
-      data: {
-        userId: user.id,
-        fundingWallet,
+    const { data: trade } = await supabaseAdmin
+      .from('trades')
+      .insert({
+        user_id: auth.user.id,
+        funding_wallet: fundingWallet,
         prediction,
         amount: numAmount,
-        payoutMultiplier: numMultiplier,
+        payout_multiplier: numMultiplier,
         duration: numDuration,
-        startPrice,
-      },
-    });
+        start_price: startPrice,
+      })
+      .select()
+      .single();
 
     // Wait for duration (in seconds)
     await new Promise<void>((resolve) => {
       setTimeout(resolve, numDuration * 1000);
     });
 
-    // Generate end price change
+    // Generate end price
     const priceChange = generateEndPrice(prediction);
     const endPrice = Math.max(0.01, startPrice + priceChange);
-
-    // Determine result
     const isWin =
       (prediction === 'buy' && endPrice > startPrice) ||
       (prediction === 'sell' && endPrice < startPrice);
@@ -124,61 +111,75 @@ export async function POST(req: NextRequest) {
     const profit = isWin ? numAmount * (numMultiplier - 1) : 0;
 
     // Update trade
-    const updatedTrade = await db.trade.update({
-      where: { id: trade.id },
-      data: { endPrice, result, profit },
-    });
+    const { data: updatedTrade } = await supabaseAdmin
+      .from('trades')
+      .update({ end_price: endPrice, result, profit })
+      .eq('id', trade.id)
+      .select()
+      .single();
 
     if (isWin) {
       if (fundingWallet === 'reward') {
-        // Return stake to reward wallet, profit to profit wallet
-        await db.wallet.update({
-          where: { userId_type: { userId: user.id, type: 'reward' } },
-          data: { balance: { increment: numAmount } },
-        });
-        await db.wallet.update({
-          where: { userId_type: { userId: user.id, type: 'profit' } },
-          data: { balance: { increment: profit } },
-        });
+        // Return stake to reward wallet
+        const { data: rw } = await supabaseAdmin
+          .from('wallets')
+          .select('*')
+          .eq('user_id', auth.user.id)
+          .eq('type', 'reward')
+          .single();
+        await supabaseAdmin.from('wallets').update({
+          balance: Number(rw!.balance) + numAmount,
+        }).eq('id', rw!.id);
+
+        // Profit to profit wallet
+        const { data: pw } = await supabaseAdmin
+          .from('wallets')
+          .select('*')
+          .eq('user_id', auth.user.id)
+          .eq('type', 'profit')
+          .single();
+        await supabaseAdmin.from('wallets').update({
+          balance: Number(pw!.balance) + profit,
+        }).eq('id', pw!.id);
       } else {
         // Deposit or profit wallet: return stake + profit to same wallet
-        await db.wallet.update({
-          where: { userId_type: { userId: user.id, type: fundingWallet } },
-          data: { balance: { increment: numAmount + profit } },
-        });
+        const { data: fw } = await supabaseAdmin
+          .from('wallets')
+          .select('*')
+          .eq('user_id', auth.user.id)
+          .eq('type', fundingWallet)
+          .single();
+        await supabaseAdmin.from('wallets').update({
+          balance: Number(fw!.balance) + numAmount + profit,
+        }).eq('id', fw!.id);
       }
 
-      await db.notification.create({
-        data: {
-          userId: user.id,
-          title: 'Trade Won! 🎉',
-          message: `Your ${prediction.toUpperCase()} trade won! Profit: ₦${profit.toLocaleString()}`,
-          type: 'trade',
-        },
+      await supabaseAdmin.from('notifications').insert({
+        user_id: auth.user.id,
+        title: 'Trade Won!',
+        message: `Your ${prediction.toUpperCase()} trade won! Profit: \u20a6${profit.toLocaleString()}`,
+        type: 'trade',
       });
     } else {
-      await db.notification.create({
-        data: {
-          userId: user.id,
-          title: 'Trade Lost',
-          message: `Your ${prediction.toUpperCase()} trade lost. ₦${numAmount.toLocaleString()} was deducted.`,
-          type: 'trade',
-        },
+      await supabaseAdmin.from('notifications').insert({
+        user_id: auth.user.id,
+        title: 'Trade Lost',
+        message: `Your ${prediction.toUpperCase()} trade lost. \u20a6${numAmount.toLocaleString()} was deducted.`,
+        type: 'trade',
       });
     }
 
-    await db.auditLog.create({
-      data: {
-        userId: user.id,
-        action: 'TRADE',
-        details: `${result.toUpperCase()}: ${prediction.toUpperCase()} ₦${numAmount.toLocaleString()} (start: ${startPrice}, end: ${endPrice})`,
-      },
+    await supabaseAdmin.from('audit_logs').insert({
+      user_id: auth.user.id,
+      action: 'TRADE',
+      details: `${result.toUpperCase()}: ${prediction.toUpperCase()} \u20a6${numAmount.toLocaleString()} (start: ${startPrice}, end: ${endPrice})`,
     });
 
     // Fetch updated wallets
-    const wallets = await db.wallet.findMany({
-      where: { userId: user.id },
-    });
+    const { data: wallets } = await supabaseAdmin
+      .from('wallets')
+      .select('*')
+      .eq('user_id', auth.user.id);
 
     return NextResponse.json({
       trade: updatedTrade,

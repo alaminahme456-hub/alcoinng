@@ -1,35 +1,27 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { db } from '@/lib/db';
-import { verifyToken } from '@/lib/auth';
+import { getAuthUser } from '@/lib/supabase/helpers';
+import { supabaseAdmin } from '@/lib/supabase/admin';
 
 export async function POST(req: NextRequest) {
   try {
-    const authHeader = req.headers.get('Authorization');
-    if (!authHeader?.startsWith('Bearer ')) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
-
-    const token = authHeader.split(' ')[1];
-    const payload = verifyToken(token);
-    if (!payload) {
-      return NextResponse.json({ error: 'Invalid or expired token' }, { status: 401 });
-    }
+    const auth = await getAuthUser();
+    if (!auth) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
     const { code } = await req.json();
     if (!code) {
       return NextResponse.json({ error: 'Deposit code is required' }, { status: 400 });
     }
 
-    const user = await db.user.findUnique({ where: { id: payload.userId } });
-    if (!user) {
-      return NextResponse.json({ error: 'User not found' }, { status: 404 });
-    }
-
-    if (!user.isActivated) {
+    if (!auth.profile.is_activated) {
       return NextResponse.json({ error: 'Account must be activated before depositing' }, { status: 403 });
     }
 
-    const depositCode = await db.depositCode.findUnique({ where: { code: code.toUpperCase() } });
+    const { data: depositCode } = await supabaseAdmin
+      .from('deposit_codes')
+      .select('*')
+      .eq('code', code.toUpperCase())
+      .single();
+
     if (!depositCode) {
       return NextResponse.json({ error: 'Invalid deposit code' }, { status: 404 });
     }
@@ -38,48 +30,46 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Deposit code has already been used' }, { status: 400 });
     }
 
-    const now = new Date();
+    const now = new Date().toISOString();
 
-    await db.$transaction([
-      db.depositCode.update({
-        where: { id: depositCode.id },
-        data: {
-          status: 'used',
-          redeemedBy: user.id,
-          redeemedAt: now,
-        },
-      }),
-      db.wallet.update({
-        where: { userId_type: { userId: user.id, type: 'deposit' } },
-        data: { balance: { increment: depositCode.amount } },
-      }),
-    ]);
+    // Mark code as used
+    await supabaseAdmin.from('deposit_codes').update({
+      status: 'used',
+      redeemed_by: auth.user.id,
+      redeemed_at: now,
+    }).eq('id', depositCode.id);
 
-    const updatedWallet = await db.wallet.findUnique({
-      where: { userId_type: { userId: user.id, type: 'deposit' } },
+    // Credit deposit wallet
+    const { data: wallet } = await supabaseAdmin
+      .from('wallets')
+      .select('*')
+      .eq('user_id', auth.user.id)
+      .eq('type', 'deposit')
+      .single();
+
+    const newBalance = Number(wallet!.balance) + Number(depositCode.amount);
+    await supabaseAdmin.from('wallets').update({
+      balance: newBalance,
+    }).eq('id', wallet!.id);
+
+    // Notification
+    await supabaseAdmin.from('notifications').insert({
+      user_id: auth.user.id,
+      title: 'Deposit Successful',
+      message: `\u20a6${Number(depositCode.amount).toLocaleString()} has been credited to your deposit wallet.`,
+      type: 'deposit',
     });
 
-    await db.notification.create({
-      data: {
-        userId: user.id,
-        title: 'Deposit Successful',
-        message: `₦${depositCode.amount.toLocaleString()} has been credited to your deposit wallet.`,
-        type: 'deposit',
-      },
-    });
-
-    await db.auditLog.create({
-      data: {
-        userId: user.id,
-        action: 'DEPOSIT',
-        details: `Deposited ₦${depositCode.amount} with code ${depositCode.code}`,
-      },
+    await supabaseAdmin.from('audit_logs').insert({
+      user_id: auth.user.id,
+      action: 'DEPOSIT',
+      details: `Deposited \u20a6${Number(depositCode.amount).toLocaleString()} with code ${depositCode.code}`,
     });
 
     return NextResponse.json({
       message: 'Deposit successful',
-      amount: depositCode.amount,
-      newBalance: updatedWallet?.balance || 0,
+      amount: Number(depositCode.amount),
+      newBalance,
     });
   } catch (error: unknown) {
     console.error('Deposit error:', error);

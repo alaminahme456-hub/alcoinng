@@ -1,80 +1,80 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { db } from '@/lib/db';
-import { verifyToken } from '@/lib/auth';
+import { getAuthUser } from '@/lib/supabase/helpers';
+import { supabaseAdmin } from '@/lib/supabase/admin';
 
 export async function POST(req: NextRequest) {
   try {
-    const authHeader = req.headers.get('Authorization');
-    if (!authHeader?.startsWith('Bearer ')) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
-
-    const token = authHeader.split(' ')[1];
-    const payload = verifyToken(token);
-    if (!payload) {
-      return NextResponse.json({ error: 'Invalid or expired token' }, { status: 401 });
-    }
+    const auth = await getAuthUser();
+    if (!auth) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
     const { adId } = await req.json();
     if (!adId) {
       return NextResponse.json({ error: 'Ad ID is required' }, { status: 400 });
     }
 
-    const user = await db.user.findUnique({ where: { id: payload.userId } });
-    if (!user) {
-      return NextResponse.json({ error: 'User not found' }, { status: 404 });
-    }
-
-    if (!user.isActivated) {
+    if (!auth.profile.is_activated) {
       return NextResponse.json({ error: 'Account must be activated' }, { status: 403 });
     }
 
-    const ad = await db.ad.findUnique({ where: { id: adId } });
-    if (!ad || !ad.isActive) {
+    const { data: ad } = await supabaseAdmin
+      .from('ads')
+      .select('*')
+      .eq('id', adId)
+      .single();
+
+    if (!ad || !ad.is_active) {
       return NextResponse.json({ error: 'Ad not found or inactive' }, { status: 404 });
     }
 
-    // Check if already watched
-    const existingView = await db.adView.findFirst({
-      where: { userId: user.id, adId },
-    });
+    // Check if already watched (UNIQUE constraint will also catch this)
+    const { data: existingView } = await supabaseAdmin
+      .from('ad_views')
+      .select('id')
+      .eq('user_id', auth.user.id)
+      .eq('ad_id', adId)
+      .single();
 
     if (existingView) {
       return NextResponse.json({ error: 'Ad already watched' }, { status: 400 });
     }
 
     // Create ad view
-    await db.adView.create({
-      data: { userId: user.id, adId, completed: true },
+    await supabaseAdmin.from('ad_views').insert({
+      user_id: auth.user.id,
+      ad_id: adId,
+      completed: true,
     });
 
     // Credit reward wallet
-    const updatedWallet = await db.wallet.update({
-      where: { userId_type: { userId: user.id, type: 'reward' } },
-      data: { balance: { increment: ad.reward } },
+    const { data: wallet } = await supabaseAdmin
+      .from('wallets')
+      .select('*')
+      .eq('user_id', auth.user.id)
+      .eq('type', 'reward')
+      .single();
+
+    const newBalance = Number(wallet!.balance) + Number(ad.reward);
+ await supabaseAdmin.from('wallets').update({
+      balance: newBalance,
+    }).eq('id', wallet!.id);
+
+    await supabaseAdmin.from('notifications').insert({
+      user_id: auth.user.id,
+      title: 'Ad Reward',
+      message: `You earned \u20a6${Number(ad.reward).toLocaleString()} for watching an ad.`,
+      type: 'reward',
     });
 
-    await db.notification.create({
-      data: {
-        userId: user.id,
-        title: 'Ad Reward',
-        message: `You earned ₦${ad.reward.toLocaleString()} for watching an ad.`,
-        type: 'reward',
-      },
-    });
-
-    await db.auditLog.create({
-      data: {
-        userId: user.id,
-        action: 'WATCH_AD',
-        details: `Watched ad '${ad.title}', earned ₦${ad.reward}`,
-      },
+    await supabaseAdmin.from('audit_logs').insert({
+      user_id: auth.user.id,
+      action: 'WATCH_AD',
+      details: `Watched ad '${ad.title}', earned \u20a6${Number(ad.reward).toLocaleString()}`,
     });
 
     return NextResponse.json({
       message: 'Ad watched successfully',
-      reward: ad.reward,
-      newBalance: updatedWallet.balance,
+      reward: Number(ad.reward),
+      newBalance,
     });
   } catch (error: unknown) {
     console.error('Watch ad error:', error);

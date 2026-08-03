@@ -1,46 +1,37 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { db } from '@/lib/db';
-import { verifyToken } from '@/lib/auth';
+import { getAuthUser } from '@/lib/supabase/helpers';
+import { supabaseAdmin } from '@/lib/supabase/admin';
 
 export async function GET(req: NextRequest) {
   try {
-    const authHeader = req.headers.get('Authorization');
-    if (!authHeader?.startsWith('Bearer ')) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
-
-    const token = authHeader.split(' ')[1];
-    const payload = verifyToken(token);
-    if (!payload) {
-      return NextResponse.json({ error: 'Invalid or expired token' }, { status: 401 });
-    }
+    const auth = await getAuthUser();
+    if (!auth) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
     const { searchParams } = new URL(req.url);
     const page = Number(searchParams.get('page')) || 1;
     const limit = Number(searchParams.get('limit')) || 20;
 
-    const [notifications, total] = await Promise.all([
-      db.notification.findMany({
-        where: { userId: payload.userId },
-        orderBy: { createdAt: 'desc' },
-        skip: (page - 1) * limit,
-        take: limit,
-      }),
-      db.notification.count({ where: { userId: payload.userId } }),
-    ]);
+    const { data: notifications, count } = await supabaseAdmin
+      .from('notifications')
+      .select('*', { count: 'exact' })
+      .eq('user_id', auth.user.id)
+      .order('created_at', { ascending: false })
+      .range((page - 1) * limit, page * limit - 1);
 
-    const unreadCount = await db.notification.count({
-      where: { userId: payload.userId, isRead: false },
-    });
+    const { count: unreadCount } = await supabaseAdmin
+      .from('notifications')
+      .select('*', { count: 'exact', head: true })
+      .eq('user_id', auth.user.id)
+      .eq('is_read', false);
 
     return NextResponse.json({
-      notifications,
-      unreadCount,
+      notifications: notifications || [],
+      unreadCount: unreadCount || 0,
       pagination: {
         page,
         limit,
-        total,
-        totalPages: Math.ceil(total / limit),
+        total: count || 0,
+        totalPages: Math.ceil((count || 0) / limit),
       },
     });
   } catch (error: unknown) {
@@ -52,34 +43,29 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   try {
-    const authHeader = req.headers.get('Authorization');
-    if (!authHeader?.startsWith('Bearer ')) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
-
-    const token = authHeader.split(' ')[1];
-    const payload = verifyToken(token);
-    if (!payload) {
-      return NextResponse.json({ error: 'Invalid or expired token' }, { status: 401 });
-    }
+    const auth = await getAuthUser();
+    if (!auth) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
     const { notificationId } = await req.json();
     if (!notificationId) {
       return NextResponse.json({ error: 'Notification ID is required' }, { status: 400 });
     }
 
-    const notification = await db.notification.findFirst({
-      where: { id: notificationId, userId: payload.userId },
-    });
+    const { data: notification } = await supabaseAdmin
+      .from('notifications')
+      .select('id')
+      .eq('id', notificationId)
+      .eq('user_id', auth.user.id)
+      .single();
 
     if (!notification) {
       return NextResponse.json({ error: 'Notification not found' }, { status: 404 });
     }
 
-    await db.notification.update({
-      where: { id: notificationId },
-      data: { isRead: true },
-    });
+    await supabaseAdmin
+      .from('notifications')
+      .update({ is_read: true })
+      .eq('id', notificationId);
 
     return NextResponse.json({ message: 'Notification marked as read' });
   } catch (error: unknown) {
