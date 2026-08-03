@@ -22,7 +22,6 @@ export async function GET(req: NextRequest) {
           id,
           user_id,
           proof,
-          proof_url,
           status,
           created_at,
           profiles!task_submissions_user_id_fkey(full_name, username)
@@ -63,7 +62,6 @@ export async function GET(req: NextRequest) {
             userId: s.user_id,
             userName: profile?.full_name || profile?.username || 'Unknown',
             proof: s.proof,
-            proofUrl: s.proof_url,
             status: s.status,
             submittedAt: s.created_at,
           };

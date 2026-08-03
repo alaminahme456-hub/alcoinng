@@ -81,7 +81,7 @@ export async function POST(req: NextRequest) {
     const startPrice = generateStartPrice();
 
     // Create trade record
-    const { data: trade } = await supabaseAdmin
+    const { data: trade, error: tradeError } = await supabaseAdmin
       .from('trades')
       .insert({
         user_id: auth.user.id,
@@ -94,6 +94,10 @@ export async function POST(req: NextRequest) {
       })
       .select()
       .single();
+
+    if (tradeError || !trade) {
+      throw new Error('Failed to create trade record');
+    }
 
     // Wait for duration (in seconds)
     await new Promise<void>((resolve) => {
@@ -127,9 +131,12 @@ export async function POST(req: NextRequest) {
           .eq('user_id', auth.user.id)
           .eq('type', 'reward')
           .single();
-        await supabaseAdmin.from('wallets').update({
-          balance: Number(rw!.balance) + numAmount,
-        }).eq('id', rw!.id);
+
+        if (rw) {
+          await supabaseAdmin.from('wallets').update({
+            balance: Number(rw.balance) + numAmount,
+          }).eq('id', rw.id);
+        }
 
         // Profit to profit wallet
         const { data: pw } = await supabaseAdmin
@@ -138,9 +145,12 @@ export async function POST(req: NextRequest) {
           .eq('user_id', auth.user.id)
           .eq('type', 'profit')
           .single();
-        await supabaseAdmin.from('wallets').update({
-          balance: Number(pw!.balance) + profit,
-        }).eq('id', pw!.id);
+
+        if (pw) {
+          await supabaseAdmin.from('wallets').update({
+            balance: Number(pw.balance) + profit,
+          }).eq('id', pw.id);
+        }
       } else {
         // Deposit or profit wallet: return stake + profit to same wallet
         const { data: fw } = await supabaseAdmin
@@ -149,9 +159,12 @@ export async function POST(req: NextRequest) {
           .eq('user_id', auth.user.id)
           .eq('type', fundingWallet)
           .single();
-        await supabaseAdmin.from('wallets').update({
-          balance: Number(fw!.balance) + numAmount + profit,
-        }).eq('id', fw!.id);
+
+        if (fw) {
+          await supabaseAdmin.from('wallets').update({
+            balance: Number(fw.balance) + numAmount + profit,
+          }).eq('id', fw.id);
+        }
       }
 
       await supabaseAdmin.from('notifications').insert({

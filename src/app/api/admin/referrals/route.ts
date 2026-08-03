@@ -68,7 +68,7 @@ export async function GET(req: NextRequest) {
       .map(([id, count]) => ({ id, count }));
 
     // Fetch those referrer profiles
-    const topReferrers = [];
+    const topReferrers: Array<Record<string, unknown>> = [];
     if (sortedReferrerIds.length > 0) {
       const { data: referrerProfiles } = await supabaseAdmin
         .from('profiles')
@@ -83,10 +83,10 @@ export async function GET(req: NextRequest) {
           const p = profile as Record<string, unknown>;
           const entry = sortedReferrerIds.find((r) => r.id === p.id);
           topReferrers.push({
-            id: p.id,
-            fullName: p.full_name,
-            username: p.username,
-            referralCode: p.referral_code,
+            id: p.id as string,
+            fullName: p.full_name as string,
+            username: p.username as string,
+            referralCode: p.referral_code as string,
             _count: { referralsMade: entry?.count || 0 },
           });
         }

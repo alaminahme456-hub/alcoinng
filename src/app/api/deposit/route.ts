@@ -47,10 +47,14 @@ export async function POST(req: NextRequest) {
       .eq('type', 'deposit')
       .single();
 
-    const newBalance = Number(wallet!.balance) + Number(depositCode.amount);
+    if (!wallet) {
+      return NextResponse.json({ error: 'Deposit wallet not found' }, { status: 500 });
+    }
+
+    const newBalance = Number(wallet.balance) + Number(depositCode.amount);
     await supabaseAdmin.from('wallets').update({
       balance: newBalance,
-    }).eq('id', wallet!.id);
+    }).eq('id', wallet.id);
 
     // Notification
     await supabaseAdmin.from('notifications').insert({

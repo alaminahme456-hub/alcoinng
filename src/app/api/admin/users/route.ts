@@ -20,7 +20,8 @@ export async function GET(req: NextRequest) {
       .select('*, wallets(id, type, balance)', { count: 'exact' });
 
     if (search) {
-      query = query.or(`full_name.ilike.%${search}%,username.ilike.%${search}%,phone.ilike.%${search}%`);
+      const safeSearch = search.replace(/,/g, '\\,');
+      query = query.or(`full_name.ilike.%${safeSearch}%,username.ilike.%${safeSearch}%,phone.ilike.%${safeSearch}%`);
     }
 
     if (status === 'activated') {

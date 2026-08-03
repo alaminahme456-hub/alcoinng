@@ -37,14 +37,19 @@ export async function GET(req: NextRequest) {
       .order('created_at', { ascending: false })
       .range((page - 1) * limit, page * limit - 1);
 
-    // Stats
-    let baseCountQuery = supabaseAdmin
-      .from('trades')
-      .select('*', { count: 'exact', head: true })
-      .eq('user_id', auth.user.id);
-
-    const { count: wins } = await baseCountQuery.eq('result', 'win');
-    const { count: losses } = await baseCountQuery.eq('result', 'loss');
+    // Stats — use separate queries to avoid mutable builder bug
+    const [{ count: wins }, { count: losses }] = await Promise.all([
+      supabaseAdmin
+        .from('trades')
+        .select('*', { count: 'exact', head: true })
+        .eq('user_id', auth.user.id)
+        .eq('result', 'win'),
+      supabaseAdmin
+        .from('trades')
+        .select('*', { count: 'exact', head: true })
+        .eq('user_id', auth.user.id)
+        .eq('result', 'loss'),
+    ]);
 
     return NextResponse.json({
       trades: trades || [],

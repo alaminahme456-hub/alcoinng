@@ -35,8 +35,8 @@ export async function GET(req: NextRequest) {
       code: row.code,
       amount: Number(row.amount),
       status: row.status,
-      usedBy: row.used_by,
-      usedAt: row.used_at,
+      redeemedBy: row.redeemed_by,
+      redeemedAt: row.redeemed_at,
       generatedAt: row.generated_at,
     }));
 
@@ -103,8 +103,8 @@ export async function POST(req: NextRequest) {
       code: row.code,
       amount: Number(row.amount),
       status: row.status,
-      usedBy: row.used_by,
-      usedAt: row.used_at,
+      redeemedBy: row.redeemed_by,
+      redeemedAt: row.redeemed_at,
       generatedAt: row.generated_at,
     }));
 
@@ -164,8 +164,8 @@ export async function PUT(req: NextRequest) {
       code: data.code,
       amount: Number(data.amount),
       status: data.status,
-      usedBy: data.used_by,
-      usedAt: data.used_at,
+      redeemedBy: data.redeemed_by,
+      redeemedAt: data.redeemed_at,
       generatedAt: data.generated_at,
     };
 

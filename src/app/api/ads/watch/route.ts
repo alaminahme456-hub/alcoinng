@@ -53,10 +53,14 @@ export async function POST(req: NextRequest) {
       .eq('type', 'reward')
       .single();
 
-    const newBalance = Number(wallet!.balance) + Number(ad.reward);
- await supabaseAdmin.from('wallets').update({
+    if (!wallet) {
+      return NextResponse.json({ error: 'Reward wallet not found' }, { status: 500 });
+    }
+
+    const newBalance = Number(wallet.balance) + Number(ad.reward);
+    await supabaseAdmin.from('wallets').update({
       balance: newBalance,
-    }).eq('id', wallet!.id);
+    }).eq('id', wallet.id);
 
     await supabaseAdmin.from('notifications').insert({
       user_id: auth.user.id,

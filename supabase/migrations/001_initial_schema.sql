@@ -233,8 +233,13 @@ CREATE TABLE IF NOT EXISTS public.announcements (
   title      TEXT NOT NULL,
   message    TEXT NOT NULL,
   is_active  BOOLEAN NOT NULL DEFAULT true,
-  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+CREATE TRIGGER announcements_updated_at
+  BEFORE UPDATE ON public.announcements
+  FOR EACH ROW EXECUTE FUNCTION public.update_updated_at();
 
 -- ============================================================
 -- 13. AUDIT LOGS

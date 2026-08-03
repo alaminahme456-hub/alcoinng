@@ -16,7 +16,7 @@ export async function GET(req: NextRequest) {
 
     let query = supabaseAdmin
       .from('withdrawals')
-      .select('*, profiles!withdrawals_user_id_fkey(full_name, username, email, phone, bank_name, bank_account, bank_account_name)', { count: 'exact' });
+      .select('*, profiles!withdrawals_user_id_fkey(full_name, username, phone, bank_name, bank_account, bank_account_name)', { count: 'exact' });
 
     if (status && ['pending', 'approved', 'rejected', 'paid'].includes(status)) {
       query = query.eq('status', status);
@@ -36,10 +36,6 @@ export async function GET(req: NextRequest) {
       wallet: row.wallet,
       amount: Number(row.amount),
       status: row.status,
-      bankName: row.bank_name,
-      bankAccount: row.bank_account,
-      bankAccountName: row.bank_account_name,
-      processedAt: row.processed_at,
       createdAt: row.created_at,
       updatedAt: row.updated_at,
       user: row.profiles
@@ -47,7 +43,6 @@ export async function GET(req: NextRequest) {
             id: (row.profiles as Record<string, unknown>).id,
             fullName: (row.profiles as Record<string, unknown>).full_name,
             username: (row.profiles as Record<string, unknown>).username,
-            email: (row.profiles as Record<string, unknown>).email || '',
             phone: (row.profiles as Record<string, unknown>).phone,
             bankName: (row.profiles as Record<string, unknown>).bank_name,
             bankAccount: (row.profiles as Record<string, unknown>).bank_account,
