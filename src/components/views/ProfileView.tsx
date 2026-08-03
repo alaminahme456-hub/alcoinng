@@ -7,10 +7,11 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { ArrowLeft, User, Building2, Lock, Save, Eye, EyeOff, CheckCircle2, ShieldCheck } from 'lucide-react';
+import { ArrowLeft, User, Building2, Lock, Save, Eye, EyeOff, CheckCircle2, ShieldCheck, LogOut } from 'lucide-react';
 
 export default function ProfileView() {
-  const { user, setUser, setView } = useAppStore();
+  const { user, setUser, setView, logout } = useAppStore();
+  const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
   const [activeTab, setActiveTab] = useState('profile');
 
   // Profile fields
@@ -372,6 +373,61 @@ export default function ProfileView() {
             </TabsContent>
           </Tabs>
         </motion.div>
+
+        {/* Logout Button */}
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.2 }}
+          className="pb-8"
+        >
+          <Button
+            onClick={() => setShowLogoutConfirm(true)}
+            className="w-full h-12 bg-destructive/10 border border-destructive/20 text-destructive hover:bg-destructive/20 font-semibold rounded-2xl"
+          >
+            <span className="flex items-center gap-2"><LogOut className="w-4 h-4" /> Log Out</span>
+          </Button>
+        </motion.div>
+
+        {/* Logout Confirmation Dialog */}
+        {showLogoutConfirm && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm"
+            onClick={() => setShowLogoutConfirm(false)}
+          >
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              className="glass rounded-2xl p-6 max-w-sm w-full space-y-4"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="text-center">
+                <div className="w-14 h-14 rounded-full bg-destructive/10 flex items-center justify-center mx-auto mb-3">
+                  <LogOut className="w-6 h-6 text-destructive" />
+                </div>
+                <h3 className="font-bold text-lg">Log Out?</h3>
+                <p className="text-sm text-muted-foreground mt-1">Are you sure you want to log out of your account?</p>
+              </div>
+              <div className="flex gap-3">
+                <Button
+                  onClick={() => setShowLogoutConfirm(false)}
+                  className="flex-1 h-11 glass border border-white/10 hover:bg-white/10 rounded-xl"
+                >
+                  Cancel
+                </Button>
+                <Button
+                  onClick={logout}
+                  className="flex-1 h-11 bg-destructive hover:bg-destructive/90 text-white font-semibold rounded-xl"
+                >
+                  Log Out
+                </Button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
       </main>
     </div>
   );
