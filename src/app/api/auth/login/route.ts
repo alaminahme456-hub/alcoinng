@@ -1,6 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createClient } from '@/lib/supabase/server';
 import { supabaseAdmin } from '@/lib/supabase/admin';
+import { createClient } from '@supabase/supabase-js';
+
+// Anon client for auth operations (server-side, cookie-less)
+const supabaseAnon = createClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL!,
+  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+);
 
 export async function POST(req: NextRequest) {
   try {
@@ -12,7 +18,6 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Email/username and password are required' }, { status: 400 });
     }
 
-    const supabase = await createClient();
     let signInEmail = loginEmail;
 
     // If logging in with username, look up the email
@@ -32,7 +37,7 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    const { data, error } = await supabase.auth.signInWithPassword({
+    const { data, error } = await supabaseAnon.auth.signInWithPassword({
       email: signInEmail!,
       password,
     });
