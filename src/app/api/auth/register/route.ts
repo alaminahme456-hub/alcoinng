@@ -131,8 +131,20 @@ export async function POST(req: NextRequest) {
       createdAt: profile.created_at,
     };
 
-    // signUp returns a session + token directly when email confirmation is off
-    const token = signUpData.session?.access_token || null;
+    // signUp returns a session when email confirmation is off.
+    // If no session (email confirmation is on), sign in to get a token.
+    let token = signUpData.session?.access_token || null;
+    if (!token) {
+      const { data: sessionData, error: signInError } = await supabaseAnon.auth.signInWithPassword({
+        email,
+        password,
+      });
+      if (signInError) {
+        console.error('Auto sign-in after signup error:', signInError.message);
+      } else {
+        token = sessionData?.session?.access_token || null;
+      }
+    }
 
     return NextResponse.json({ user, token }, { status: 201 });
   } catch (error: unknown) {
