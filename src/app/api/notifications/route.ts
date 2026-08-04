@@ -1,38 +1,31 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getAuthUser } from '@/lib/supabase/helpers';
-import { supabaseAdmin } from '@/lib/supabase/admin';
+import { getDB } from '@/lib/db';
+import { getAuthUser } from '@/lib/auth';
+
+function getToken(req: NextRequest): string | null {
+  const auth = req.headers.get('authorization');
+  return auth?.startsWith('Bearer ') ? auth.slice(7) : null;
+}
 
 export async function GET(req: NextRequest) {
   try {
-    const auth = await getAuthUser();
+    const auth = getAuthUser(getToken(req)!);
     if (!auth) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
     const { searchParams } = new URL(req.url);
     const page = Number(searchParams.get('page')) || 1;
     const limit = Number(searchParams.get('limit')) || 20;
+    const offset = (page - 1) * limit;
+    const db = getDB();
 
-    const { data: notifications, count } = await supabaseAdmin
-      .from('notifications')
-      .select('*', { count: 'exact' })
-      .eq('user_id', auth.user.id)
-      .order('created_at', { ascending: false })
-      .range((page - 1) * limit, page * limit - 1);
-
-    const { count: unreadCount } = await supabaseAdmin
-      .from('notifications')
-      .select('*', { count: 'exact', head: true })
-      .eq('user_id', auth.user.id)
-      .eq('is_read', false);
+    const totalRow = db.prepare('SELECT COUNT(*) as count FROM notifications WHERE user_id = ?').get(auth.id) as { count: number };
+    const notifications = db.prepare('SELECT * FROM notifications WHERE user_id = ? ORDER BY created_at DESC LIMIT ? OFFSET ?').all(auth.id, limit, offset);
+    const unreadRow = db.prepare('SELECT COUNT(*) as count FROM notifications WHERE user_id = ? AND is_read = 0').get(auth.id) as { count: number };
 
     return NextResponse.json({
       notifications: notifications || [],
-      unreadCount: unreadCount || 0,
-      pagination: {
-        page,
-        limit,
-        total: count || 0,
-        totalPages: Math.ceil((count || 0) / limit),
-      },
+      unreadCount: unreadRow?.count || 0,
+      pagination: { page, limit, total: totalRow?.count || 0, totalPages: Math.ceil((totalRow?.count || 0) / limit) },
     });
   } catch (error: unknown) {
     console.error('Fetch notifications error:', error);
@@ -43,30 +36,17 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   try {
-    const auth = await getAuthUser();
+    const auth = getAuthUser(getToken(req)!);
     if (!auth) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
     const { notificationId } = await req.json();
-    if (!notificationId) {
-      return NextResponse.json({ error: 'Notification ID is required' }, { status: 400 });
-    }
+    if (!notificationId) return NextResponse.json({ error: 'Notification ID is required' }, { status: 400 });
 
-    const { data: notification } = await supabaseAdmin
-      .from('notifications')
-      .select('id')
-      .eq('id', notificationId)
-      .eq('user_id', auth.user.id)
-      .single();
+    const db = getDB();
+    const notif = db.prepare('SELECT id FROM notifications WHERE id = ? AND user_id = ?').get(notificationId, auth.id);
+    if (!notif) return NextResponse.json({ error: 'Notification not found' }, { status: 404 });
 
-    if (!notification) {
-      return NextResponse.json({ error: 'Notification not found' }, { status: 404 });
-    }
-
-    await supabaseAdmin
-      .from('notifications')
-      .update({ is_read: true })
-      .eq('id', notificationId);
-
+    db.prepare('UPDATE notifications SET is_read = 1 WHERE id = ?').run(notificationId);
     return NextResponse.json({ message: 'Notification marked as read' });
   } catch (error: unknown) {
     console.error('Mark notification error:', error);

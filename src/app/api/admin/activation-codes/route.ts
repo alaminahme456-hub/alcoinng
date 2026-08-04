@@ -1,12 +1,17 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { supabaseAdmin } from '@/lib/supabase/admin';
-import { getAuthAdmin } from '@/lib/supabase/helpers';
-import { generateCode } from '@/lib/auth';
+import { getDB, insertAuditLog } from '@/lib/db';
+import { getAuthAdmin, generateCode } from '@/lib/auth';
+
+function getToken(req: NextRequest): string | null {
+  const auth = req.headers.get('authorization');
+  return auth?.startsWith('Bearer ') ? auth.slice(7) : null;
+}
 
 export async function GET(req: NextRequest) {
   try {
-    const auth = await getAuthAdmin();
-    if (!auth) {
+    const token = getToken(req);
+    const admin = getAuthAdmin(token || '');
+    if (!admin) {
       return NextResponse.json({ error: 'Admin access required' }, { status: 403 });
     }
 
@@ -14,24 +19,30 @@ export async function GET(req: NextRequest) {
     const status = searchParams.get('status');
     const page = Number(searchParams.get('page')) || 1;
     const limit = Number(searchParams.get('limit')) || 20;
+    const offset = (page - 1) * limit;
 
-    let query = supabaseAdmin
-      .from('activation_codes')
-      .select('*', { count: 'exact' });
+    const db = getDB();
+
+    let whereClause = '';
+    const params: unknown[] = [];
 
     if (status && ['unused', 'used', 'disabled'].includes(status)) {
-      query = query.eq('status', status);
+      whereClause = 'WHERE status = ?';
+      params.push(status);
     }
 
-    const { data, count, error } = await query
-      .order('generated_at', { ascending: false })
-      .range((page - 1) * limit, page * limit - 1);
+    // Count total
+    const countRow = db.prepare(
+      `SELECT COUNT(*) as count FROM activation_codes ${whereClause}`
+    ).get(...params) as { count: number };
+    const total = countRow?.count || 0;
 
-    if (error) throw error;
-    const total = count || 0;
+    // Fetch paginated codes
+    const rows = db.prepare(
+      `SELECT * FROM activation_codes ${whereClause} ORDER BY generated_at DESC LIMIT ? OFFSET ?`
+    ).all(...params, limit, offset) as Array<Record<string, unknown>>;
 
-    // Map snake_case to camelCase to match old Prisma shape
-    const codes = (data || []).map((row: Record<string, unknown>) => ({
+    const codes = rows.map((row) => ({
       id: row.id,
       code: row.code,
       value: Number(row.value),
@@ -54,8 +65,9 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   try {
-    const auth = await getAuthAdmin();
-    if (!auth) {
+    const token = getToken(req);
+    const admin = getAuthAdmin(token || '');
+    if (!admin) {
       return NextResponse.json({ error: 'Admin access required' }, { status: 403 });
     }
 
@@ -66,36 +78,35 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Count must be between 1 and 100' }, { status: 400 });
     }
 
-    const inserts: Array<{ code: string; value: number; status: string }> = [];
+    const db = getDB();
+    const insertStmt = db.prepare(
+      'INSERT INTO activation_codes (id, code, value, status) VALUES (?, ?, ?, ?)'
+    );
+    const checkStmt = db.prepare('SELECT id FROM activation_codes WHERE code = ?');
 
-    for (let i = 0; i < numCount; i++) {
-      let code = generateCode();
-      // Check for uniqueness
-      const { data: existing } = await supabaseAdmin
-        .from('activation_codes')
-        .select('id')
-        .eq('code', code)
-        .single();
-      while (existing) {
-        code = generateCode();
-        const check = await supabaseAdmin
-          .from('activation_codes')
-          .select('id')
-          .eq('code', code)
-          .single();
-        if (!check.data) break;
+    const insertMany = db.transaction(() => {
+      const ids: string[] = [];
+      for (let i = 0; i < numCount; i++) {
+        let code = generateCode();
+        while (checkStmt.get(code)) {
+          code = generateCode();
+        }
+        const id = crypto.randomUUID();
+        insertStmt.run(id, code, Number(value) || 5000, 'unused');
+        ids.push(id);
       }
-      inserts.push({ code, value: Number(value) || 5000, status: 'unused' });
-    }
+      return ids;
+    });
 
-    const { data, error } = await supabaseAdmin
-      .from('activation_codes')
-      .insert(inserts)
-      .select();
+    const insertedIds = insertMany();
 
-    if (error) throw error;
+    // Fetch the inserted codes for response
+    const placeholders = insertedIds.map(() => '?').join(', ');
+    const rows = db.prepare(
+      `SELECT * FROM activation_codes WHERE id IN (${placeholders})`
+    ).all(...insertedIds) as Array<Record<string, unknown>>;
 
-    const codes = (data || []).map((row: Record<string, unknown>) => ({
+    const codes = rows.map((row) => ({
       id: row.id,
       code: row.code,
       value: Number(row.value),
@@ -105,11 +116,7 @@ export async function POST(req: NextRequest) {
       generatedAt: row.generated_at,
     }));
 
-    await supabaseAdmin.from('audit_logs').insert({
-      user_id: auth.user.id,
-      action: 'GENERATE_ACTIVATION_CODES',
-      details: `Generated ${numCount} activation codes`,
-    });
+    insertAuditLog(db, admin.id, 'GENERATE_ACTIVATION_CODES', `Generated ${numCount} activation codes`);
 
     return NextResponse.json({ codes, message: `${numCount} activation code(s) generated` }, { status: 201 });
   } catch (error: unknown) {
@@ -121,8 +128,9 @@ export async function POST(req: NextRequest) {
 
 export async function PUT(req: NextRequest) {
   try {
-    const auth = await getAuthAdmin();
-    if (!auth) {
+    const token = getToken(req);
+    const admin = getAuthAdmin(token || '');
+    if (!admin) {
       return NextResponse.json({ error: 'Admin access required' }, { status: 403 });
     }
 
@@ -131,13 +139,11 @@ export async function PUT(req: NextRequest) {
       return NextResponse.json({ error: 'Code ID and action are required' }, { status: 400 });
     }
 
-    const { data: activationCode, error: fetchError } = await supabaseAdmin
-      .from('activation_codes')
-      .select('*')
-      .eq('id', codeId)
-      .single();
+    const db = getDB();
 
-    if (fetchError || !activationCode) {
+    const activationCode = db.prepare('SELECT * FROM activation_codes WHERE id = ?').get(codeId) as Record<string, unknown> | undefined;
+
+    if (!activationCode) {
       return NextResponse.json({ error: 'Activation code not found' }, { status: 404 });
     }
 
@@ -147,14 +153,9 @@ export async function PUT(req: NextRequest) {
 
     const newStatus = action === 'disable' ? 'disabled' : 'unused';
 
-    const { data, error } = await supabaseAdmin
-      .from('activation_codes')
-      .update({ status: newStatus })
-      .eq('id', codeId)
-      .select()
-      .single();
+    db.prepare('UPDATE activation_codes SET status = ? WHERE id = ?').run(newStatus, codeId);
 
-    if (error) throw error;
+    const data = db.prepare('SELECT * FROM activation_codes WHERE id = ?').get(codeId) as Record<string, unknown>;
 
     const code = {
       id: data.id,

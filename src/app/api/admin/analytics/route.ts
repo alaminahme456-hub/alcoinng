@@ -1,148 +1,84 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { supabaseAdmin } from '@/lib/supabase/admin';
-import { getAuthAdmin } from '@/lib/supabase/helpers';
+import { getDB } from '@/lib/db';
+import { getAuthAdmin } from '@/lib/auth';
+
+function getToken(req: NextRequest): string | null {
+  const auth = req.headers.get('authorization');
+  return auth?.startsWith('Bearer ') ? auth.slice(7) : null;
+}
 
 export async function GET(req: NextRequest) {
   try {
-    const auth = await getAuthAdmin();
-    if (!auth) {
+    const token = getToken(req);
+    const admin = getAuthAdmin(token || '');
+    if (!admin) {
       return NextResponse.json({ error: 'Admin access required' }, { status: 403 });
     }
 
-    // Core counts in parallel
-    const [
-      totalUsersRes,
-      activatedUsersRes,
-      pendingActivationsRes,
-      activeTasksRes,
-      activeAdsRes,
-    ] = await Promise.all([
-      supabaseAdmin.from('profiles').select('*', { count: 'exact', head: true }),
-      supabaseAdmin.from('profiles').select('*', { count: 'exact', head: true }).eq('is_activated', true),
-      supabaseAdmin.from('profiles').select('*', { count: 'exact', head: true }).eq('is_activated', false),
-      supabaseAdmin.from('tasks').select('*', { count: 'exact', head: true }).eq('is_active', true),
-      supabaseAdmin.from('ads').select('*', { count: 'exact', head: true }).eq('is_active', true),
-    ]);
+    const db = getDB();
 
-    const totalUsers = totalUsersRes.count || 0;
-    const activatedUsers = activatedUsersRes.count || 0;
-    const pendingActivations = pendingActivationsRes.count || 0;
-    const activeTasks = activeTasksRes.count || 0;
-    const activeAds = activeAdsRes.count || 0;
+    // Users
+    const totalUsers = (db.prepare('SELECT COUNT(*) as count FROM users').get() as { count: number }).count || 0;
+    const activatedUsers = (db.prepare('SELECT COUNT(*) as count FROM users WHERE is_activated = 1').get() as { count: number }).count || 0;
+    const pendingActivations = (db.prepare('SELECT COUNT(*) as count FROM users WHERE is_activated = 0').get() as { count: number }).count || 0;
 
-    // Wallet totals
-    const [rewardRes, depositRes, profitRes] = await Promise.all([
-      supabaseAdmin.from('wallets').select('balance').eq('type', 'reward'),
-      supabaseAdmin.from('wallets').select('balance').eq('type', 'deposit'),
-      supabaseAdmin.from('wallets').select('balance').eq('type', 'profit'),
-    ]);
+    // Wallets
+    const rewardRow = db.prepare('SELECT COALESCE(SUM(balance), 0) as total FROM wallets WHERE type = ?').get('reward') as { total: number };
+    const depositRow = db.prepare('SELECT COALESCE(SUM(balance), 0) as total FROM wallets WHERE type = ?').get('deposit') as { total: number };
+    const profitRow = db.prepare('SELECT COALESCE(SUM(balance), 0) as total FROM wallets WHERE type = ?').get('profit') as { total: number };
+    const rewardBalance = Number(rewardRow.total) || 0;
+    const depositBalance = Number(depositRow.total) || 0;
+    const profitBalance = Number(profitRow.total) || 0;
 
-    const rewardBalance = (rewardRes.data || []).reduce(
-      (sum: number, r: Record<string, unknown>) => sum + Number(r.balance),
-      0
-    );
-    const depositBalance = (depositRes.data || []).reduce(
-      (sum: number, r: Record<string, unknown>) => sum + Number(r.balance),
-      0
-    );
-    const profitBalance = (profitRes.data || []).reduce(
-      (sum: number, r: Record<string, unknown>) => sum + Number(r.balance),
-      0
-    );
+    // Deposits (from used deposit codes)
+    const depositTotalRow = db.prepare("SELECT COALESCE(SUM(amount), 0) as total FROM deposit_codes WHERE status = 'used'").get() as { total: number };
+    const totalDeposits = Number(depositTotalRow.total) || 0;
 
-    // Total deposits (from used deposit codes)
-    const { data: usedDepositCodesData } = await supabaseAdmin
-      .from('deposit_codes')
-      .select('amount')
-      .eq('status', 'used');
+    // Withdrawals
+    const paidRow = db.prepare("SELECT COALESCE(SUM(amount), 0) as total FROM withdrawals WHERE status = 'paid'").get() as { total: number };
+    const totalPaid = Number(paidRow.total) || 0;
 
-    const totalDeposits = (usedDepositCodesData || []).reduce(
-      (sum: number, r: Record<string, unknown>) => sum + Number(r.amount),
-      0
-    );
+    const pendingAmtRow = db.prepare("SELECT COALESCE(SUM(amount), 0) as total FROM withdrawals WHERE status = 'pending'").get() as { total: number };
+    const pendingAmount = Number(pendingAmtRow.total) || 0;
 
-    // Withdrawal stats
-    const [paidWithdrawalsRes, pendingWithdrawalsRes, pendingWithdrawalCountRes] =
-      await Promise.all([
-        supabaseAdmin.from('withdrawals').select('amount').eq('status', 'paid'),
-        supabaseAdmin.from('withdrawals').select('amount').eq('status', 'pending'),
-        supabaseAdmin.from('withdrawals').select('*', { count: 'exact', head: true }).eq('status', 'pending'),
-      ]);
+    const pendingWdCount = (db.prepare("SELECT COUNT(*) as count FROM withdrawals WHERE status = 'pending'").get() as { count: number }).count || 0;
 
-    const totalPaid = (paidWithdrawalsRes.data || []).reduce(
-      (sum: number, r: Record<string, unknown>) => sum + Number(r.amount),
-      0
-    );
-    const pendingAmount = (pendingWithdrawalsRes.data || []).reduce(
-      (sum: number, r: Record<string, unknown>) => sum + Number(r.amount),
-      0
-    );
-    const pendingCount = pendingWithdrawalCountRes.count || 0;
+    // Trades
+    const totalTrades = (db.prepare('SELECT COUNT(*) as count FROM trades').get() as { count: number }).count || 0;
+    const winningTrades = (db.prepare("SELECT COUNT(*) as count FROM trades WHERE result = 'win'").get() as { count: number }).count || 0;
+    const losingTrades = (db.prepare("SELECT COUNT(*) as count FROM trades WHERE result = 'loss'").get() as { count: number }).count || 0;
 
-    // Trade stats
-    const [
-      totalTradesRes,
-      winningTradesRes,
-      losingTradesRes,
-      allTradesAmountRes,
-      winningTradesProfitRes,
-    ] = await Promise.all([
-      supabaseAdmin.from('trades').select('*', { count: 'exact', head: true }),
-      supabaseAdmin.from('trades').select('*', { count: 'exact', head: true }).eq('result', 'win'),
-      supabaseAdmin.from('trades').select('*', { count: 'exact', head: true }).eq('result', 'loss'),
-      supabaseAdmin.from('trades').select('amount'),
-      supabaseAdmin.from('trades').select('profit').eq('result', 'win'),
-    ]);
+    const stakedRow = db.prepare('SELECT COALESCE(SUM(amount), 0) as total FROM trades').get() as { total: number };
+    const totalStaked = Number(stakedRow.total) || 0;
 
-    const totalTrades = totalTradesRes.count || 0;
-    const winningTrades = winningTradesRes.count || 0;
-    const losingTrades = losingTradesRes.count || 0;
-    const totalStaked = (allTradesAmountRes.data || []).reduce(
-      (sum: number, r: Record<string, unknown>) => sum + Number(r.amount),
-      0
-    );
-    const totalProfitPaid = (winningTradesProfitRes.data || []).reduce(
-      (sum: number, r: Record<string, unknown>) => sum + Number(r.profit),
-      0
-    );
+    const profitPaidRow = db.prepare("SELECT COALESCE(SUM(profit), 0) as total FROM trades WHERE result = 'win'").get() as { total: number };
+    const totalProfitPaid = Number(profitPaidRow.total) || 0;
 
-    // Daily registrations for last 30 days — fetch all and group in JS
-    const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
-    const { data: recentUsers } = await supabaseAdmin
-      .from('profiles')
-      .select('created_at')
-      .gte('created_at', thirtyDaysAgo);
+    // Tasks
+    const activeTasks = (db.prepare('SELECT COUNT(*) as count FROM tasks WHERE is_active = 1').get() as { count: number }).count || 0;
+    const pendingSubmissions = (db.prepare("SELECT COUNT(*) as count FROM task_submissions WHERE status = 'pending'").get() as { count: number }).count || 0;
+
+    // Ads
+    const activeAds = (db.prepare('SELECT COUNT(*) as count FROM ads WHERE is_active = 1').get() as { count: number }).count || 0;
+
+    // Activation codes
+    const unusedCodes = (db.prepare("SELECT COUNT(*) as count FROM activation_codes WHERE status = 'unused'").get() as { count: number }).count || 0;
+    const usedCodes = (db.prepare("SELECT COUNT(*) as count FROM activation_codes WHERE status = 'used'").get() as { count: number }).count || 0;
+
+    // Deposit codes
+    const unusedDepositCodes = (db.prepare("SELECT COUNT(*) as count FROM deposit_codes WHERE status = 'unused'").get() as { count: number }).count || 0;
+    const usedDepositCodes = (db.prepare("SELECT COUNT(*) as count FROM deposit_codes WHERE status = 'used'").get() as { count: number }).count || 0;
+
+    // Daily registrations — last 30 days
+    const recentRows = db
+      .prepare("SELECT created_at FROM users WHERE created_at >= datetime('now', '-30 days')")
+      .all() as Array<{ created_at: string }>;
 
     const registrationByDate: Record<string, number> = {};
-    for (const u of recentUsers || []) {
-      const row = u as Record<string, unknown>;
-      const dateKey = new Date(row.created_at as string).toISOString().split('T')[0];
+    for (const u of recentRows) {
+      const dateKey = new Date(u.created_at).toISOString().split('T')[0];
       registrationByDate[dateKey] = (registrationByDate[dateKey] || 0) + 1;
     }
-
-    // Pending task submissions
-    const { count: pendingSubmissions } = await supabaseAdmin
-      .from('task_submissions')
-      .select('*', { count: 'exact', head: true })
-      .eq('status', 'pending');
-
-    // Activation codes stats
-    const [unusedCodesRes, usedCodesRes] = await Promise.all([
-      supabaseAdmin.from('activation_codes').select('*', { count: 'exact', head: true }).eq('status', 'unused'),
-      supabaseAdmin.from('activation_codes').select('*', { count: 'exact', head: true }).eq('status', 'used'),
-    ]);
-
-    const unusedCodes = unusedCodesRes.count || 0;
-    const usedCodes = usedCodesRes.count || 0;
-
-    // Deposit codes stats
-    const [unusedDepositCodesRes, usedDepositCodesRes] = await Promise.all([
-      supabaseAdmin.from('deposit_codes').select('*', { count: 'exact', head: true }).eq('status', 'unused'),
-      supabaseAdmin.from('deposit_codes').select('*', { count: 'exact', head: true }).eq('status', 'used'),
-    ]);
-
-    const unusedDepositCodes = unusedDepositCodesRes.count || 0;
-    const usedDepositCodes = usedDepositCodesRes.count || 0;
 
     return NextResponse.json({
       users: {
@@ -162,7 +98,7 @@ export async function GET(req: NextRequest) {
       withdrawals: {
         totalPaid,
         pendingAmount,
-        pendingCount,
+        pendingCount: pendingWdCount,
       },
       wallets: {
         rewardBalance,
@@ -178,7 +114,7 @@ export async function GET(req: NextRequest) {
       },
       tasks: {
         active: activeTasks,
-        pendingSubmissions: pendingSubmissions || 0,
+        pendingSubmissions,
       },
       ads: {
         active: activeAds,

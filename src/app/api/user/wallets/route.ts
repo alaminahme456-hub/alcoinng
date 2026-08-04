@@ -1,20 +1,24 @@
-import { NextResponse } from 'next/server';
-import { getAuthUser } from '@/lib/supabase/helpers';
-import { supabaseAdmin } from '@/lib/supabase/admin';
+import { NextRequest, NextResponse } from 'next/server';
+import { getDB, ensureWallets } from '@/lib/db';
+import { getAuthUser } from '@/lib/auth';
 
-export async function GET() {
+function getToken(req: NextRequest): string | null {
+  const auth = req.headers.get('authorization');
+  return auth?.startsWith('Bearer ') ? auth.slice(7) : null;
+}
+
+export async function GET(req: NextRequest) {
   try {
-    const auth = await getAuthUser();
+    const token = getToken(req);
+    const auth = getAuthUser(token!);
     if (!auth) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
-    const { data: wallets } = await supabaseAdmin
-      .from('wallets')
-      .select('*')
-      .eq('user_id', auth.user.id);
+    const db = getDB();
+    const wallets = ensureWallets(db, auth.id) as Array<Record<string, unknown>>;
 
     const walletMap: Record<string, { id: string; type: string; balance: number }> = {};
-    for (const w of (wallets || [])) {
-      walletMap[w.type] = { id: w.id, type: w.type, balance: Number(w.balance) };
+    for (const w of wallets) {
+      walletMap[w.type as string] = { id: w.id as string, type: w.type as string, balance: Number(w.balance) };
     }
 
     return NextResponse.json({

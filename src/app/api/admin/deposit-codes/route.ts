@@ -1,12 +1,17 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { supabaseAdmin } from '@/lib/supabase/admin';
-import { getAuthAdmin } from '@/lib/supabase/helpers';
-import { generateCode } from '@/lib/auth';
+import { getDB, insertAuditLog } from '@/lib/db';
+import { getAuthAdmin, generateCode } from '@/lib/auth';
+
+function getToken(req: NextRequest): string | null {
+  const auth = req.headers.get('authorization');
+  return auth?.startsWith('Bearer ') ? auth.slice(7) : null;
+}
 
 export async function GET(req: NextRequest) {
   try {
-    const auth = await getAuthAdmin();
-    if (!auth) {
+    const token = getToken(req);
+    const admin = getAuthAdmin(token || '');
+    if (!admin) {
       return NextResponse.json({ error: 'Admin access required' }, { status: 403 });
     }
 
@@ -14,23 +19,30 @@ export async function GET(req: NextRequest) {
     const status = searchParams.get('status');
     const page = Number(searchParams.get('page')) || 1;
     const limit = Number(searchParams.get('limit')) || 20;
+    const offset = (page - 1) * limit;
 
-    let query = supabaseAdmin
-      .from('deposit_codes')
-      .select('*', { count: 'exact' });
+    const db = getDB();
+
+    let whereClause = '';
+    const params: unknown[] = [];
 
     if (status && ['unused', 'used', 'disabled'].includes(status)) {
-      query = query.eq('status', status);
+      whereClause = 'WHERE status = ?';
+      params.push(status);
     }
 
-    const { data, count, error } = await query
-      .order('generated_at', { ascending: false })
-      .range((page - 1) * limit, page * limit - 1);
+    // Count total
+    const countRow = db.prepare(
+      `SELECT COUNT(*) as count FROM deposit_codes ${whereClause}`
+    ).get(...params) as { count: number };
+    const total = countRow?.count || 0;
 
-    if (error) throw error;
-    const total = count || 0;
+    // Fetch paginated codes
+    const rows = db.prepare(
+      `SELECT * FROM deposit_codes ${whereClause} ORDER BY generated_at DESC LIMIT ? OFFSET ?`
+    ).all(...params, limit, offset) as Array<Record<string, unknown>>;
 
-    const codes = (data || []).map((row: Record<string, unknown>) => ({
+    const codes = rows.map((row) => ({
       id: row.id,
       code: row.code,
       amount: Number(row.amount),
@@ -53,8 +65,9 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   try {
-    const auth = await getAuthAdmin();
-    if (!auth) {
+    const token = getToken(req);
+    const admin = getAuthAdmin(token || '');
+    if (!admin) {
       return NextResponse.json({ error: 'Admin access required' }, { status: 403 });
     }
 
@@ -70,35 +83,35 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Count must be between 1 and 100' }, { status: 400 });
     }
 
-    const inserts: Array<{ code: string; amount: number; status: string }> = [];
+    const db = getDB();
+    const insertStmt = db.prepare(
+      'INSERT INTO deposit_codes (id, code, amount, status) VALUES (?, ?, ?, ?)'
+    );
+    const checkStmt = db.prepare('SELECT id FROM deposit_codes WHERE code = ?');
 
-    for (let i = 0; i < numCount; i++) {
-      let code = generateCode();
-      const { data: existing } = await supabaseAdmin
-        .from('deposit_codes')
-        .select('id')
-        .eq('code', code)
-        .single();
-      while (existing) {
-        code = generateCode();
-        const check = await supabaseAdmin
-          .from('deposit_codes')
-          .select('id')
-          .eq('code', code)
-          .single();
-        if (!check.data) break;
+    const insertMany = db.transaction(() => {
+      const ids: string[] = [];
+      for (let i = 0; i < numCount; i++) {
+        let code = generateCode();
+        while (checkStmt.get(code)) {
+          code = generateCode();
+        }
+        const id = crypto.randomUUID();
+        insertStmt.run(id, code, numAmount, 'unused');
+        ids.push(id);
       }
-      inserts.push({ code, amount: numAmount, status: 'unused' });
-    }
+      return ids;
+    });
 
-    const { data, error } = await supabaseAdmin
-      .from('deposit_codes')
-      .insert(inserts)
-      .select();
+    const insertedIds = insertMany();
 
-    if (error) throw error;
+    // Fetch the inserted codes for response
+    const placeholders = insertedIds.map(() => '?').join(', ');
+    const rows = db.prepare(
+      `SELECT * FROM deposit_codes WHERE id IN (${placeholders})`
+    ).all(...insertedIds) as Array<Record<string, unknown>>;
 
-    const codes = (data || []).map((row: Record<string, unknown>) => ({
+    const codes = rows.map((row) => ({
       id: row.id,
       code: row.code,
       amount: Number(row.amount),
@@ -108,11 +121,7 @@ export async function POST(req: NextRequest) {
       generatedAt: row.generated_at,
     }));
 
-    await supabaseAdmin.from('audit_logs').insert({
-      user_id: auth.user.id,
-      action: 'GENERATE_DEPOSIT_CODES',
-      details: `Generated ${numCount} deposit codes of ₦${numAmount.toLocaleString()} each`,
-    });
+    insertAuditLog(db, admin.id, 'GENERATE_DEPOSIT_CODES', `Generated ${numCount} deposit codes of \u20a6${numAmount.toLocaleString()} each`);
 
     return NextResponse.json({ codes, message: `${numCount} deposit code(s) generated` }, { status: 201 });
   } catch (error: unknown) {
@@ -124,8 +133,9 @@ export async function POST(req: NextRequest) {
 
 export async function PUT(req: NextRequest) {
   try {
-    const auth = await getAuthAdmin();
-    if (!auth) {
+    const token = getToken(req);
+    const admin = getAuthAdmin(token || '');
+    if (!admin) {
       return NextResponse.json({ error: 'Admin access required' }, { status: 403 });
     }
 
@@ -134,13 +144,11 @@ export async function PUT(req: NextRequest) {
       return NextResponse.json({ error: 'Code ID and action are required' }, { status: 400 });
     }
 
-    const { data: depositCode, error: fetchError } = await supabaseAdmin
-      .from('deposit_codes')
-      .select('*')
-      .eq('id', codeId)
-      .single();
+    const db = getDB();
 
-    if (fetchError || !depositCode) {
+    const depositCode = db.prepare('SELECT * FROM deposit_codes WHERE id = ?').get(codeId) as Record<string, unknown> | undefined;
+
+    if (!depositCode) {
       return NextResponse.json({ error: 'Deposit code not found' }, { status: 404 });
     }
 
@@ -150,14 +158,9 @@ export async function PUT(req: NextRequest) {
 
     const newStatus = action === 'disable' ? 'disabled' : 'unused';
 
-    const { data, error } = await supabaseAdmin
-      .from('deposit_codes')
-      .update({ status: newStatus })
-      .eq('id', codeId)
-      .select()
-      .single();
+    db.prepare('UPDATE deposit_codes SET status = ? WHERE id = ?').run(newStatus, codeId);
 
-    if (error) throw error;
+    const data = db.prepare('SELECT * FROM deposit_codes WHERE id = ?').get(codeId) as Record<string, unknown>;
 
     const code = {
       id: data.id,

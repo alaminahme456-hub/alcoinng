@@ -1,32 +1,43 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { supabaseAdmin } from '@/lib/supabase/admin';
-import { getAuthAdmin } from '@/lib/supabase/helpers';
+import { getDB, insertAuditLog, touchUpdated } from '@/lib/db';
+import { getAuthAdmin } from '@/lib/auth';
+
+function getToken(req: NextRequest): string | null {
+  const auth = req.headers.get('authorization');
+  return auth?.startsWith('Bearer ') ? auth.slice(7) : null;
+}
 
 export async function GET(req: NextRequest) {
   try {
-    const auth = await getAuthAdmin();
-    if (!auth) {
+    const token = getToken(req);
+    const admin = getAuthAdmin(token || '');
+    if (!admin) {
       return NextResponse.json({ error: 'Admin access required' }, { status: 403 });
     }
 
     const { searchParams } = new URL(req.url);
     const page = Number(searchParams.get('page')) || 1;
     const limit = Number(searchParams.get('limit')) || 20;
+    const offset = (page - 1) * limit;
 
-    const { data, count, error } = await supabaseAdmin
-      .from('announcements')
-      .select('*', { count: 'exact' })
-      .order('created_at', { ascending: false })
-      .range((page - 1) * limit, page * limit - 1);
+    const db = getDB();
 
-    if (error) throw error;
-    const total = count || 0;
+    const countRow = db.prepare('SELECT COUNT(*) as count FROM announcements').get() as {
+      count: number;
+    };
+    const total = countRow?.count || 0;
 
-    const announcements = (data || []).map((row: Record<string, unknown>) => ({
+    const rows = db
+      .prepare(
+        `SELECT * FROM announcements ORDER BY created_at DESC LIMIT ? OFFSET ?`
+      )
+      .all(limit, offset) as Array<Record<string, unknown>>;
+
+    const announcements = rows.map((row) => ({
       id: row.id,
       title: row.title,
       message: row.message,
-      isActive: row.is_active,
+      isActive: Boolean(row.is_active),
       createdAt: row.created_at,
       updatedAt: row.updated_at,
     }));
@@ -44,8 +55,9 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   try {
-    const auth = await getAuthAdmin();
-    if (!auth) {
+    const token = getToken(req);
+    const admin = getAuthAdmin(token || '');
+    if (!admin) {
       return NextResponse.json({ error: 'Admin access required' }, { status: 403 });
     }
 
@@ -54,25 +66,25 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Title and message are required' }, { status: 400 });
     }
 
-    const { data, error } = await supabaseAdmin
-      .from('announcements')
-      .insert({ title, message })
-      .select()
-      .single();
+    const db = getDB();
+    const id = crypto.randomUUID();
 
-    if (error) throw error;
+    db.prepare(
+      'INSERT INTO announcements (id, title, message, is_active) VALUES (?, ?, ?, 1)'
+    ).run(id, title, message);
 
-    await supabaseAdmin.from('audit_logs').insert({
-      user_id: auth.user.id,
-      action: 'CREATE_ANNOUNCEMENT',
-      details: `Created announcement: ${title}`,
-    });
+    insertAuditLog(db, admin.id, 'CREATE_ANNOUNCEMENT', `Created announcement: ${title}`);
+
+    const data = db.prepare('SELECT * FROM announcements WHERE id = ?').get(id) as Record<
+      string,
+      unknown
+    >;
 
     const announcement = {
       id: data.id,
       title: data.title,
       message: data.message,
-      isActive: data.is_active,
+      isActive: Boolean(data.is_active),
       createdAt: data.created_at,
       updatedAt: data.updated_at,
     };
@@ -87,8 +99,9 @@ export async function POST(req: NextRequest) {
 
 export async function PUT(req: NextRequest) {
   try {
-    const auth = await getAuthAdmin();
-    if (!auth) {
+    const token = getToken(req);
+    const admin = getAuthAdmin(token || '');
+    if (!admin) {
       return NextResponse.json({ error: 'Admin access required' }, { status: 403 });
     }
 
@@ -97,30 +110,31 @@ export async function PUT(req: NextRequest) {
       return NextResponse.json({ error: 'Announcement ID is required' }, { status: 400 });
     }
 
-    const { data: existing, error: fetchError } = await supabaseAdmin
-      .from('announcements')
-      .select('*')
-      .eq('id', announcementId)
-      .single();
+    const db = getDB();
 
-    if (fetchError || !existing) {
+    const existing = db
+      .prepare('SELECT * FROM announcements WHERE id = ?')
+      .get(announcementId) as Record<string, unknown> | undefined;
+
+    if (!existing) {
       return NextResponse.json({ error: 'Announcement not found' }, { status: 404 });
     }
 
-    const { data, error } = await supabaseAdmin
-      .from('announcements')
-      .update({ is_active: !existing.is_active })
-      .eq('id', announcementId)
-      .select()
-      .single();
+    // Toggle is_active: flip 0 ↔ 1
+    const newActive = existing.is_active ? 0 : 1;
 
-    if (error) throw error;
+    db.prepare('UPDATE announcements SET is_active = ? WHERE id = ?').run(newActive, announcementId);
+    touchUpdated(db, 'announcements', announcementId);
+
+    const data = db
+      .prepare('SELECT * FROM announcements WHERE id = ?')
+      .get(announcementId) as Record<string, unknown>;
 
     const announcement = {
       id: data.id,
       title: data.title,
       message: data.message,
-      isActive: data.is_active,
+      isActive: Boolean(data.is_active),
       createdAt: data.created_at,
       updatedAt: data.updated_at,
     };
@@ -138,8 +152,9 @@ export async function PUT(req: NextRequest) {
 
 export async function DELETE(req: NextRequest) {
   try {
-    const auth = await getAuthAdmin();
-    if (!auth) {
+    const token = getToken(req);
+    const admin = getAuthAdmin(token || '');
+    if (!admin) {
       return NextResponse.json({ error: 'Admin access required' }, { status: 403 });
     }
 
@@ -149,18 +164,11 @@ export async function DELETE(req: NextRequest) {
       return NextResponse.json({ error: 'Announcement ID is required' }, { status: 400 });
     }
 
-    const { error } = await supabaseAdmin
-      .from('announcements')
-      .delete()
-      .eq('id', announcementId);
+    const db = getDB();
 
-    if (error) throw error;
+    db.prepare('DELETE FROM announcements WHERE id = ?').run(announcementId);
 
-    await supabaseAdmin.from('audit_logs').insert({
-      user_id: auth.user.id,
-      action: 'DELETE_ANNOUNCEMENT',
-      details: `Deleted announcement ${announcementId}`,
-    });
+    insertAuditLog(db, admin.id, 'DELETE_ANNOUNCEMENT', `Deleted announcement ${announcementId}`);
 
     return NextResponse.json({ message: 'Announcement deleted successfully' });
   } catch (error: unknown) {

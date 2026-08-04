@@ -1,81 +1,41 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { supabaseAdmin } from '@/lib/supabase/admin';
-
-function getSupabaseAnon() {
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-  if (!url || !key) return null;
-  const { createClient } = require('@supabase/supabase-js');
-  return createClient(url, key);
-}
+import { getDB, mapProfileRow, insertAuditLog } from '@/lib/db';
+import { comparePassword, signToken } from '@/lib/auth';
 
 export async function POST(req: NextRequest) {
   try {
-    const supabaseAnon = getSupabaseAnon();
-    if (!supabaseAnon) {
-      return NextResponse.json({ error: 'Server configuration error' }, { status: 500 });
+    const { loginId, password } = await req.json();
+
+    if (!loginId || !password) {
+      return NextResponse.json({ error: 'Login ID and password are required' }, { status: 400 });
     }
 
-    const { email, username, loginId, password } = await req.json();
-    const loginEmail = email || loginId;
-    const loginUsername = username || loginId;
+    const db = getDB();
 
-    if ((!loginEmail && !loginUsername) || !password) {
-      return NextResponse.json({ error: 'Email/username and password are required' }, { status: 400 });
-    }
+    // Look up user by email or username
+    const row = db.prepare('SELECT * FROM users WHERE email = ? OR username = ?').get(loginId, loginId) as Record<string, unknown> | undefined;
 
-    let signInEmail = loginEmail;
-
-    // If logging in with username, look up the email
-    if (!signInEmail && loginUsername) {
-      const { data: profile } = await supabaseAdmin
-        .from('profiles')
-        .select('id')
-        .eq('username', loginUsername)
-        .single();
-      if (!profile) {
-        return NextResponse.json({ error: 'Invalid credentials' }, { status: 401 });
-      }
-      const { data: userData } = await supabaseAdmin.auth.admin.getUserById(profile.id);
-      signInEmail = userData.user?.email;
-      if (!signInEmail) {
-        return NextResponse.json({ error: 'Invalid credentials' }, { status: 401 });
-      }
-    }
-
-    const { data, error } = await supabaseAnon.auth.signInWithPassword({
-      email: signInEmail!,
-      password,
-    });
-
-    if (error) {
+    if (!row) {
       return NextResponse.json({ error: 'Invalid credentials' }, { status: 401 });
     }
 
-    const { data: profile } = await supabaseAdmin
-      .from('profiles')
-      .select('*')
-      .eq('id', data.user.id)
-      .single();
+    // Compare password
+    const valid = await comparePassword(password, row.password_hash as string);
+    if (!valid) {
+      return NextResponse.json({ error: 'Invalid credentials' }, { status: 401 });
+    }
 
-    const user = {
-      id: profile.id,
-      fullName: profile.full_name,
-      username: profile.username,
-      email: data.user.email!,
-      phone: profile.phone,
-      role: profile.role,
-      isActivated: profile.is_activated,
-      activatedAt: profile.activated_at,
-      referralCode: profile.referral_code,
-      profilePicture: profile.profile_picture,
-      bankName: profile.bank_name,
-      bankAccount: profile.bank_account,
-      bankAccountName: profile.bank_account_name,
-      createdAt: profile.created_at,
-    };
+    // Sign JWT
+    const token = await signToken({
+      userId: row.id as string,
+      role: row.role as string,
+      email: row.email as string,
+    });
 
-    return NextResponse.json({ user, token: data.session.access_token });
+    // Audit log
+    insertAuditLog(db, row.id as string, 'user.login', 'Logged in');
+
+    return NextResponse.json({ user: mapProfileRow(row), token });
   } catch (error: unknown) {
     console.error('Login error:', error);
     const message = error instanceof Error ? error.message : 'Login failed';

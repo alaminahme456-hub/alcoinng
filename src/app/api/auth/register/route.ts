@@ -1,151 +1,74 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { supabaseAdmin } from '@/lib/supabase/admin';
-import { generateReferralCode } from '@/lib/auth';
-
-function getSupabaseAnon() {
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-  if (!url || !key) return null;
-  const { createClient } = require('@supabase/supabase-js');
-  return createClient(url, key);
-}
+import { getDB, mapProfileRow, ensureWallets, insertAuditLog } from '@/lib/db';
+import { hashPassword, storeOTP, generateReferralCode } from '@/lib/auth';
 
 export async function POST(req: NextRequest) {
   try {
-    const supabaseAnon = getSupabaseAnon();
-    if (!supabaseAnon) {
-      return NextResponse.json({ error: 'Server configuration error' }, { status: 500 });
-    }
-
     const { fullName, username, email, phone, password, referralCode } = await req.json();
 
+    // Validate required fields
     if (!fullName || !username || !email || !phone || !password) {
       return NextResponse.json({ error: 'All fields are required' }, { status: 400 });
     }
 
-    // Check for existing username
-    const { data: existingUsername, error: checkErr } = await supabaseAdmin
-      .from('profiles')
-      .select('id')
-      .eq('username', username)
-      .single();
+    const db = getDB();
 
-    if (checkErr && checkErr.code !== 'PGRST116') {
-      console.error('Username check error:', checkErr);
-      return NextResponse.json({ error: 'Failed to check username' }, { status: 500 });
-    }
+    // Check username uniqueness
+    const existingUsername = db.prepare('SELECT id FROM users WHERE username = ?').get(username);
     if (existingUsername) {
       return NextResponse.json({ error: 'Username already taken' }, { status: 409 });
+    }
+
+    // Check email uniqueness
+    const existingEmail = db.prepare('SELECT id FROM users WHERE email = ?').get(email);
+    if (existingEmail) {
+      return NextResponse.json({ error: 'Email already registered' }, { status: 409 });
     }
 
     // Validate referral code if provided
     let referrerId: string | undefined;
     if (referralCode) {
-      const { data: referrer, error: refErr } = await supabaseAdmin
-        .from('profiles')
-        .select('id')
-        .eq('referral_code', referralCode)
-        .single();
-      if (refErr || !referrer) {
+      const referrer = db.prepare('SELECT id FROM users WHERE referral_code = ?').get(referralCode) as Record<string, unknown> | undefined;
+      if (!referrer) {
         return NextResponse.json({ error: 'Invalid referral code' }, { status: 400 });
       }
-      referrerId = referrer.id;
+      referrerId = referrer.id as string;
     }
 
     // Generate unique referral code
     let finalReferralCode = generateReferralCode();
-    let codeExists = await supabaseAdmin
-      .from('profiles')
-      .select('id')
-      .eq('referral_code', finalReferralCode)
-      .single();
-    while (codeExists) {
+    while (db.prepare('SELECT id FROM users WHERE referral_code = ?').get(finalReferralCode)) {
       finalReferralCode = generateReferralCode();
-      codeExists = await supabaseAdmin
-        .from('profiles')
-        .select('id')
-        .eq('referral_code', finalReferralCode)
-        .single();
     }
 
-    // Sign up via anon client
-    const { data: signUpData, error: signUpError } = await supabaseAnon.auth.signUp({
-      email,
-      password,
-      options: {
-        data: {
-          full_name: fullName,
-          username,
-          phone,
-        },
-      },
-    });
+    // Hash password
+    const passwordHash = await hashPassword(password);
 
-    if (signUpError || !signUpData.user) {
-      const msg = signUpError?.message || 'Failed to create account';
-      if (msg.includes('already registered') || msg.includes('already been registered')) {
-        return NextResponse.json({ error: 'Email already registered' }, { status: 409 });
-      }
-      return NextResponse.json({ error: msg }, { status: 400 });
-    }
+    // Create user
+    const userId = crypto.randomUUID();
+    db.prepare(`
+      INSERT INTO users (id, email, password_hash, full_name, username, phone, referral_code, referred_by, email_verified)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0)
+    `).run(userId, email, passwordHash, fullName, username, phone, finalReferralCode, referrerId ?? null);
 
-    // Update profile with correct referral code and referred_by
-    const updateData: Record<string, unknown> = {
-      referral_code: finalReferralCode,
-      full_name: fullName,
-      username,
-      phone,
-    };
-    if (referrerId) updateData.referred_by = referrerId;
+    // Create wallets
+    ensureWallets(db, userId);
 
-    const { error: updateError } = await supabaseAdmin
-      .from('profiles')
-      .update(updateData)
-      .eq('id', signUpData.user.id);
+    // Generate and store OTP
+    const otpCode = storeOTP(db, userId);
 
-    if (updateError) {
-      console.error('Profile update error after signup:', updateError);
-    }
+    // Audit log
+    insertAuditLog(db, userId, 'user.registered', `Registered as @${username}`);
 
-    // Fetch the created profile
-    const { data: profile } = await supabaseAdmin
-      .from('profiles')
-      .select('*')
-      .eq('id', signUpData.user.id)
-      .single();
+    // Fetch the created user row for response
+    const userRow = db.prepare('SELECT * FROM users WHERE id = ?').get(userId) as Record<string, unknown>;
 
-    const user = {
-      id: profile.id,
-      fullName: profile.full_name,
-      username: profile.username,
-      email: signUpData.user.email!,
-      phone: profile.phone,
-      role: profile.role,
-      isActivated: profile.is_activated,
-      activatedAt: profile.activated_at,
-      referralCode: profile.referral_code,
-      profilePicture: profile.profile_picture,
-      bankName: profile.bank_name,
-      bankAccount: profile.bank_account,
-      bankAccountName: profile.bank_account_name,
-      createdAt: profile.created_at,
-    };
-
-    // signUp returns a session when email confirmation is off.
-    // If no session (email confirmation is on), user needs to verify OTP first.
-    let token = signUpData.session?.access_token || null;
-
-    if (!token) {
-      // Email confirmation is ON - return pending user info so frontend can show OTP screen
-      return NextResponse.json({
-        user,
-        token: null,
-        requiresOtp: true,
-        pendingEmail: email,
-      }, { status: 201 });
-    }
-
-    return NextResponse.json({ user, token, requiresOtp: false }, { status: 201 });
+    return NextResponse.json({
+      user: mapProfileRow(userRow),
+      token: null,
+      requiresOtp: true,
+      otp: otpCode,
+    }, { status: 201 });
   } catch (error: unknown) {
     console.error('Register error:', error);
     const message = error instanceof Error ? error.message : 'Registration failed';

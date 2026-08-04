@@ -1,10 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getAuthUser } from '@/lib/supabase/helpers';
-import { supabaseAdmin } from '@/lib/supabase/admin';
+import { getDB } from '@/lib/db';
+import { getAuthUser } from '@/lib/auth';
+
+function getToken(req: NextRequest): string | null {
+  const auth = req.headers.get('authorization');
+  return auth?.startsWith('Bearer ') ? auth.slice(7) : null;
+}
 
 export async function GET(req: NextRequest) {
   try {
-    const auth = await getAuthUser();
+    const auth = getAuthUser(getToken(req)!);
     if (!auth) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
     const { searchParams } = new URL(req.url);
@@ -14,52 +19,43 @@ export async function GET(req: NextRequest) {
     const endDate = searchParams.get('endDate');
     const page = Number(searchParams.get('page')) || 1;
     const limit = Number(searchParams.get('limit')) || 20;
+    const offset = (page - 1) * limit;
 
-    let query = supabaseAdmin
-      .from('trades')
-      .select('*', { count: 'exact' })
-      .eq('user_id', auth.user.id);
+    const conditions: string[] = ['user_id = ?'];
+    const params: unknown[] = [auth.id];
 
     if (wallet && ['reward', 'deposit', 'profit'].includes(wallet)) {
-      query = query.eq('funding_wallet', wallet);
+      conditions.push('funding_wallet = ?');
+      params.push(wallet);
     }
     if (result && ['win', 'loss'].includes(result)) {
-      query = query.eq('result', result);
+      conditions.push('result = ?');
+      params.push(result);
     }
     if (startDate) {
-      query = query.gte('created_at', new Date(startDate).toISOString());
+      conditions.push('created_at >= ?');
+      params.push(new Date(startDate).toISOString());
     }
     if (endDate) {
-      query = query.lte('created_at', new Date(endDate).toISOString());
+      conditions.push('created_at <= ?');
+      params.push(new Date(endDate).toISOString());
     }
 
-    const { data: trades, count } = await query
-      .order('created_at', { ascending: false })
-      .range((page - 1) * limit, page * limit - 1);
+    const where = conditions.join(' AND ');
+    const db = getDB();
 
-    // Stats — use separate queries to avoid mutable builder bug
-    const [{ count: wins }, { count: losses }] = await Promise.all([
-      supabaseAdmin
-        .from('trades')
-        .select('*', { count: 'exact', head: true })
-        .eq('user_id', auth.user.id)
-        .eq('result', 'win'),
-      supabaseAdmin
-        .from('trades')
-        .select('*', { count: 'exact', head: true })
-        .eq('user_id', auth.user.id)
-        .eq('result', 'loss'),
-    ]);
+    const totalRow = db.prepare(`SELECT COUNT(*) as count FROM trades WHERE ${where}`).get(...params) as { count: number };
+    const total = totalRow?.count || 0;
+
+    const trades = db.prepare(`SELECT * FROM trades WHERE ${where} ORDER BY created_at DESC LIMIT ? OFFSET ?`).all(...params, limit, offset);
+
+    const winsRow = db.prepare('SELECT COUNT(*) as count FROM trades WHERE user_id = ? AND result = ?').get(auth.id, 'win') as { count: number };
+    const lossesRow = db.prepare('SELECT COUNT(*) as count FROM trades WHERE user_id = ? AND result = ?').get(auth.id, 'loss') as { count: number };
 
     return NextResponse.json({
       trades: trades || [],
-      pagination: {
-        page,
-        limit,
-        total: count || 0,
-        totalPages: Math.ceil((count || 0) / limit),
-      },
-      stats: { wins: wins || 0, losses: losses || 0, totalTrades: (wins || 0) + (losses || 0) },
+      pagination: { page, limit, total, totalPages: Math.ceil(total / limit) },
+      stats: { wins: winsRow?.count || 0, losses: lossesRow?.count || 0, totalTrades: (winsRow?.count || 0) + (lossesRow?.count || 0) },
     });
   } catch (error: unknown) {
     console.error('Trade history error:', error);

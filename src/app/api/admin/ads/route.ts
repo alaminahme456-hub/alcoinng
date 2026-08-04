@@ -1,40 +1,51 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { supabaseAdmin } from '@/lib/supabase/admin';
-import { getAuthAdmin } from '@/lib/supabase/helpers';
+import { getDB, touchUpdated, intBool, insertAuditLog } from '@/lib/db';
+import { getAuthAdmin } from '@/lib/auth';
+
+function getToken(req: NextRequest): string | null {
+  const auth = req.headers.get('authorization');
+  return auth?.startsWith('Bearer ') ? auth.slice(7) : null;
+}
 
 export async function GET(req: NextRequest) {
   try {
-    const auth = await getAuthAdmin();
-    if (!auth) {
+    const token = getToken(req);
+    const admin = getAuthAdmin(token || '');
+    if (!admin) {
       return NextResponse.json({ error: 'Admin access required' }, { status: 403 });
     }
 
     const { searchParams } = new URL(req.url);
     const page = Number(searchParams.get('page')) || 1;
     const limit = Number(searchParams.get('limit')) || 20;
+    const offset = (page - 1) * limit;
 
-    const { data: rows, count, error } = await supabaseAdmin
-      .from('ads')
-      .select(`*, ad_views(id)`, { count: 'exact' })
-      .order('created_at', { ascending: false })
-      .range((page - 1) * limit, page * limit - 1);
+    const db = getDB();
 
-    if (error) throw error;
-    const total = count || 0;
+    // Count total
+    const countRow = db.prepare('SELECT COUNT(*) as count FROM ads').get() as { count: number };
+    const total = countRow?.count || 0;
 
-    const ads = (rows || []).map((row: Record<string, unknown>) => {
-      const views = row.ad_views as Array<Record<string, unknown>> || [];
+    // Fetch paginated ads
+    const rows = db.prepare(
+      'SELECT * FROM ads ORDER BY created_at DESC LIMIT ? OFFSET ?'
+    ).all(limit, offset) as Array<Record<string, unknown>>;
+
+    const viewCountStmt = db.prepare('SELECT COUNT(*) as cnt FROM ad_views WHERE ad_id = ?');
+
+    const ads = rows.map((row) => {
+      const viewRow = viewCountStmt.get(row.id) as { cnt: number } | undefined;
       return {
         id: row.id,
         title: row.title,
         thumbnail: row.thumbnail,
         duration: Number(row.duration),
         reward: Number(row.reward),
-        isActive: row.is_active,
+        isActive: Boolean(row.is_active),
         createdAt: row.created_at,
         updatedAt: row.updated_at,
         _count: {
-          views: views.length,
+          views: viewRow?.cnt || 0,
         },
       };
     });
@@ -52,8 +63,9 @@ export async function GET(req: NextRequest) {
 
 export async function PUT(req: NextRequest) {
   try {
-    const auth = await getAuthAdmin();
-    if (!auth) {
+    const token = getToken(req);
+    const admin = getAuthAdmin(token || '');
+    if (!admin) {
       return NextResponse.json({ error: 'Admin access required' }, { status: 403 });
     }
 
@@ -62,21 +74,35 @@ export async function PUT(req: NextRequest) {
       return NextResponse.json({ error: 'Ad ID is required' }, { status: 400 });
     }
 
-    const updateData: Record<string, unknown> = {};
-    if (title !== undefined) updateData.title = title;
-    if (thumbnail !== undefined) updateData.thumbnail = thumbnail;
-    if (duration !== undefined) updateData.duration = Number(duration);
-    if (reward !== undefined) updateData.reward = Number(reward);
-    if (isActive !== undefined) updateData.is_active = Boolean(isActive);
+    const db = getDB();
 
-    const { data, error } = await supabaseAdmin
-      .from('ads')
-      .update(updateData)
-      .eq('id', adId)
-      .select()
-      .single();
+    const existing = db.prepare('SELECT id FROM ads WHERE id = ?').get(adId);
+    if (!existing) {
+      return NextResponse.json({ error: 'Ad not found' }, { status: 404 });
+    }
 
-    if (error) throw error;
+    // Build SET clause dynamically for partial update
+    const setParts: string[] = [];
+    const params: unknown[] = [];
+
+    if (title !== undefined) { setParts.push('title = ?'); params.push(title); }
+    if (thumbnail !== undefined) { setParts.push('thumbnail = ?'); params.push(thumbnail); }
+    if (duration !== undefined) { setParts.push('duration = ?'); params.push(Number(duration)); }
+    if (reward !== undefined) { setParts.push('reward = ?'); params.push(Number(reward)); }
+    if (isActive !== undefined) { setParts.push('is_active = ?'); params.push(intBool(Boolean(isActive))); }
+
+    if (setParts.length === 0) {
+      return NextResponse.json({ error: 'No fields to update' }, { status: 400 });
+    }
+
+    setParts.push("updated_at = datetime('now')");
+    params.push(adId);
+
+    db.prepare(
+      `UPDATE ads SET ${setParts.join(', ')} WHERE id = ?`
+    ).run(...params);
+
+    const data = db.prepare('SELECT * FROM ads WHERE id = ?').get(adId) as Record<string, unknown>;
 
     const ad = {
       id: data.id,
@@ -84,7 +110,7 @@ export async function PUT(req: NextRequest) {
       thumbnail: data.thumbnail,
       duration: Number(data.duration),
       reward: Number(data.reward),
-      isActive: data.is_active,
+      isActive: Boolean(data.is_active),
       createdAt: data.created_at,
       updatedAt: data.updated_at,
     };
@@ -99,8 +125,9 @@ export async function PUT(req: NextRequest) {
 
 export async function DELETE(req: NextRequest) {
   try {
-    const auth = await getAuthAdmin();
-    if (!auth) {
+    const token = getToken(req);
+    const admin = getAuthAdmin(token || '');
+    if (!admin) {
       return NextResponse.json({ error: 'Admin access required' }, { status: 403 });
     }
 
@@ -110,20 +137,13 @@ export async function DELETE(req: NextRequest) {
       return NextResponse.json({ error: 'Ad ID is required' }, { status: 400 });
     }
 
+    const db = getDB();
+
     // Delete ad views first, then the ad
-    const { error: viewError } = await supabaseAdmin
-      .from('ad_views')
-      .delete()
-      .eq('ad_id', adId);
+    db.prepare('DELETE FROM ad_views WHERE ad_id = ?').run(adId);
+    db.prepare('DELETE FROM ads WHERE id = ?').run(adId);
 
-    if (viewError) throw viewError;
-
-    const { error } = await supabaseAdmin
-      .from('ads')
-      .delete()
-      .eq('id', adId);
-
-    if (error) throw error;
+    insertAuditLog(db, admin.id, 'DELETE_AD', `Deleted ad ${adId}`);
 
     return NextResponse.json({ message: 'Ad deleted successfully' });
   } catch (error: unknown) {

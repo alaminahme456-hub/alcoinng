@@ -1,13 +1,19 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getAuthUser, mapProfileRow } from '@/lib/supabase/helpers';
-import { supabaseAdmin } from '@/lib/supabase/admin';
+import { getDB, mapProfileRow, insertAuditLog, touchUpdated } from '@/lib/db';
+import { getAuthUser } from '@/lib/auth';
 
-export async function GET() {
+function getToken(req: NextRequest): string | null {
+  const auth = req.headers.get('authorization');
+  return auth?.startsWith('Bearer ') ? auth.slice(7) : null;
+}
+
+export async function GET(req: NextRequest) {
   try {
-    const auth = await getAuthUser();
+    const token = getToken(req);
+    const auth = getAuthUser(token!);
     if (!auth) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
-    const user = mapProfileRow({ ...auth.profile, email: auth.email });
+    const user = mapProfileRow({ ...auth.profile, email: auth.email } as Record<string, unknown>);
     return NextResponse.json({ user });
   } catch (error: unknown) {
     console.error('Get profile error:', error);
@@ -18,42 +24,35 @@ export async function GET() {
 
 export async function PUT(req: NextRequest) {
   try {
-    const auth = await getAuthUser();
+    const token = getToken(req);
+    const auth = getAuthUser(token!);
     if (!auth) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
     const body = await req.json();
     const { fullName, phone, profilePicture, bankName, bankAccount, bankAccountName } = body;
 
-    const updateData: Record<string, unknown> = {};
-    if (fullName !== undefined) updateData.full_name = fullName;
-    if (phone !== undefined) updateData.phone = phone;
-    if (profilePicture !== undefined) updateData.profile_picture = profilePicture;
-    if (bankName !== undefined) updateData.bank_name = bankName;
-    if (bankAccount !== undefined) updateData.bank_account = bankAccount;
-    if (bankAccountName !== undefined) updateData.bank_account_name = bankAccountName;
+    const fields: string[] = [];
+    const values: unknown[] = [];
 
-    if (Object.keys(updateData).length === 0) {
+    if (fullName !== undefined) { fields.push('full_name = ?'); values.push(fullName); }
+    if (phone !== undefined) { fields.push('phone = ?'); values.push(phone); }
+    if (profilePicture !== undefined) { fields.push('profile_picture = ?'); values.push(profilePicture); }
+    if (bankName !== undefined) { fields.push('bank_name = ?'); values.push(bankName); }
+    if (bankAccount !== undefined) { fields.push('bank_account = ?'); values.push(bankAccount); }
+    if (bankAccountName !== undefined) { fields.push('bank_account_name = ?'); values.push(bankAccountName); }
+
+    if (fields.length === 0) {
       return NextResponse.json({ error: 'No fields to update' }, { status: 400 });
     }
 
-    await supabaseAdmin
-      .from('profiles')
-      .update(updateData)
-      .eq('id', auth.user.id);
+    const db = getDB();
+    values.push(auth.id);
+    db.prepare(`UPDATE users SET ${fields.join(', ')} WHERE id = ?`).run(...values);
+    touchUpdated(db, 'users', auth.id);
+    insertAuditLog(db, auth.id, 'UPDATE_PROFILE', `Updated profile fields: ${fields.map(f => f.split(' = ')[0]).join(', ')}`);
 
-    await supabaseAdmin.from('audit_logs').insert({
-      user_id: auth.user.id,
-      action: 'UPDATE_PROFILE',
-      details: `Updated profile fields: ${Object.keys(updateData).join(', ')}`,
-    });
-
-    const { data: profile } = await supabaseAdmin
-      .from('profiles')
-      .select('*')
-      .eq('id', auth.user.id)
-      .single();
-
-    const user = mapProfileRow({ ...profile, email: auth.email });
+    const row = db.prepare('SELECT * FROM users WHERE id = ?').get(auth.id) as Record<string, unknown>;
+    const user = mapProfileRow({ ...row, email: auth.email } as Record<string, unknown>);
     return NextResponse.json({ user, message: 'Profile updated successfully' });
   } catch (error: unknown) {
     console.error('Update profile error:', error);

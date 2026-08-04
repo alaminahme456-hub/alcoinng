@@ -1,44 +1,24 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createClient } from '@/lib/supabase/server';
-import { supabaseAdmin } from '@/lib/supabase/admin';
+import { getAuthUser } from '@/lib/auth';
+
+function getToken(req: NextRequest): string | null {
+  const auth = req.headers.get('authorization');
+  return auth?.startsWith('Bearer ') ? auth.slice(7) : null;
+}
 
 export async function GET(req: NextRequest) {
   try {
-    const supabase = await createClient();
-    const { data: { user }, error } = await supabase.auth.getUser();
-
-    if (error || !user) {
+    const token = getToken(req);
+    if (!token) {
       return NextResponse.json({ error: 'Invalid or expired token' }, { status: 401 });
     }
 
-    const { data: profile } = await supabaseAdmin
-      .from('profiles')
-      .select('*')
-      .eq('id', user.id)
-      .single();
-
-    if (!profile) {
-      return NextResponse.json({ error: 'User not found' }, { status: 404 });
+    const auth = getAuthUser(token);
+    if (!auth) {
+      return NextResponse.json({ error: 'Invalid or expired token' }, { status: 401 });
     }
 
-    const userData = {
-      id: profile.id,
-      fullName: profile.full_name,
-      username: profile.username,
-      email: user.email!,
-      phone: profile.phone,
-      role: profile.role,
-      isActivated: profile.is_activated,
-      activatedAt: profile.activated_at,
-      referralCode: profile.referral_code,
-      profilePicture: profile.profile_picture,
-      bankName: profile.bank_name,
-      bankAccount: profile.bank_account,
-      bankAccountName: profile.bank_account_name,
-      createdAt: profile.created_at,
-    };
-
-    return NextResponse.json({ user: userData });
+    return NextResponse.json({ user: auth.profile });
   } catch (error: unknown) {
     console.error('Session error:', error);
     const message = error instanceof Error ? error.message : 'Session check failed';

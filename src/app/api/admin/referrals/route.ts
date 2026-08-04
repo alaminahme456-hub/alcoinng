@@ -1,122 +1,124 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { supabaseAdmin } from '@/lib/supabase/admin';
-import { getAuthAdmin } from '@/lib/supabase/helpers';
+import { getDB, insertAuditLog } from '@/lib/db';
+import { getAuthAdmin } from '@/lib/auth';
+
+function getToken(req: NextRequest): string | null {
+  const auth = req.headers.get('authorization');
+  return auth?.startsWith('Bearer ') ? auth.slice(7) : null;
+}
 
 export async function GET(req: NextRequest) {
   try {
-    const auth = await getAuthAdmin();
-    if (!auth) {
+    const token = getToken(req);
+    const admin = getAuthAdmin(token || '');
+    if (!admin) {
       return NextResponse.json({ error: 'Admin access required' }, { status: 403 });
     }
 
     const { searchParams } = new URL(req.url);
     const page = Number(searchParams.get('page')) || 1;
     const limit = Number(searchParams.get('limit')) || 20;
+    const offset = (page - 1) * limit;
 
-    // Get all users who were referred (referred_by is not null)
-    // Join with the referrer profile
-    let query = supabaseAdmin
-      .from('profiles')
-      .select('*, referrer:profiles!referred_by(id, full_name, username, referral_code)', { count: 'exact' })
-      .not('referred_by', 'is', null);
+    const db = getDB();
 
-    const { data: rows, count, error } = await query
-      .order('created_at', { ascending: false })
-      .range((page - 1) * limit, page * limit - 1);
+    // Count total referred users
+    const countRow = db
+      .prepare("SELECT COUNT(*) as count FROM users WHERE referred_by IS NOT NULL")
+      .get() as { count: number };
+    const total = countRow?.count || 0;
 
-    if (error) throw error;
-    const total = count || 0;
+    // Fetch paginated referred users
+    const rows = db
+      .prepare(
+        `SELECT id, full_name, username, email, phone, is_activated, referred_by, created_at
+         FROM users WHERE referred_by IS NOT NULL
+         ORDER BY created_at DESC LIMIT ? OFFSET ?`
+      )
+      .all(limit, offset) as Array<Record<string, unknown>>;
 
-    const referrals = (rows || []).map((row: Record<string, unknown>) => ({
-      id: row.id,
-      fullName: row.full_name,
-      username: row.username,
-      email: '',
-      phone: row.phone,
-      isActivated: row.is_activated,
-      referredBy: row.referred_by,
-      createdAt: row.created_at,
-      referredByUser: row.referrer
-        ? {
-            id: (row.referrer as Record<string, unknown>).id,
-            fullName: (row.referrer as Record<string, unknown>).full_name,
-            username: (row.referrer as Record<string, unknown>).username,
-            referralCode: (row.referrer as Record<string, unknown>).referral_code,
-          }
-        : null,
-    }));
+    // For each referred user, fetch the referrer's info
+    const referrals = rows.map((row) => {
+      const referrer = db
+        .prepare(
+          'SELECT id, full_name, username, referral_code FROM users WHERE id = ?'
+        )
+        .get(row.referred_by) as Record<string, unknown> | undefined;
 
-    // Top 10 referrers: fetch all profiles, group by referred_by in JS
-    const { data: allReferred } = await supabaseAdmin
-      .from('profiles')
-      .select('referred_by')
-      .not('referred_by', 'is', null);
+      return {
+        id: row.id,
+        fullName: row.full_name,
+        username: row.username,
+        email: row.email,
+        phone: row.phone,
+        isActivated: Boolean(row.is_activated),
+        referredBy: row.referred_by,
+        createdAt: row.created_at,
+        referredByUser: referrer
+          ? {
+              id: referrer.id,
+              fullName: referrer.full_name,
+              username: referrer.username,
+              referralCode: referrer.referral_code,
+            }
+          : null,
+      };
+    });
 
-    // Count referrals per referrer
-    const referrerCounts: Record<string, number> = {};
-    for (const r of allReferred || []) {
-      const key = (r as Record<string, unknown>).referred_by as string;
-      if (key) {
-        referrerCounts[key] = (referrerCounts[key] || 0) + 1;
-      }
-    }
+    // Top 10 referrers by referral count
+    const topReferrerRows = db
+      .prepare(
+        `SELECT referred_by, COUNT(*) as count
+         FROM users WHERE referred_by IS NOT NULL
+         GROUP BY referred_by ORDER BY count DESC LIMIT 10`
+      )
+      .all() as Array<{ referred_by: string; count: number }>;
 
-    // Get top 10 referrer IDs sorted by count desc
-    const sortedReferrerIds = Object.entries(referrerCounts)
-      .sort(([, a], [, b]) => b - a)
-      .slice(0, 10)
-      .map(([id, count]) => ({ id, count }));
+    const topReferrers = topReferrerRows.map((r) => {
+      const profile = db
+        .prepare(
+          'SELECT id, full_name, username, referral_code FROM users WHERE id = ?'
+        )
+        .get(r.referred_by) as Record<string, unknown> | undefined;
 
-    // Fetch those referrer profiles
-    const topReferrers: Array<Record<string, unknown>> = [];
-    if (sortedReferrerIds.length > 0) {
-      const { data: referrerProfiles } = await supabaseAdmin
-        .from('profiles')
-        .select('id, full_name, username, referral_code')
-        .in(
-          'id',
-          sortedReferrerIds.map((r) => r.id)
-        );
-
-      if (referrerProfiles) {
-        for (const profile of referrerProfiles) {
-          const p = profile as Record<string, unknown>;
-          const entry = sortedReferrerIds.find((r) => r.id === p.id);
-          topReferrers.push({
-            id: p.id as string,
-            fullName: p.full_name as string,
-            username: p.username as string,
-            referralCode: p.referral_code as string,
-            _count: { referralsMade: entry?.count || 0 },
-          });
-        }
-      }
-    }
+      return {
+        id: r.referred_by,
+        fullName: profile?.full_name || '',
+        username: profile?.username || '',
+        referralCode: profile?.referral_code || '',
+        _count: { referralsMade: r.count },
+      };
+    });
 
     // Stats
-    const { count: totalReferralUsers } = await supabaseAdmin
-      .from('profiles')
-      .select('*', { count: 'exact', head: true })
-      .not('referred_by', 'is', null);
+    const totalReferralUsers = total;
 
-    const { count: activeReferralUsers } = await supabaseAdmin
-      .from('profiles')
-      .select('*', { count: 'exact', head: true })
-      .not('referred_by', 'is', null)
-      .eq('is_activated', true);
+    const activeRow = db
+      .prepare(
+        "SELECT COUNT(*) as count FROM users WHERE referred_by IS NOT NULL AND is_activated = 1"
+      )
+      .get() as { count: number };
+    const activeReferralUsers = activeRow?.count || 0;
+
+    const conversionRate =
+      totalReferralUsers > 0
+        ? Math.round((activeReferralUsers / totalReferralUsers) * 100)
+        : 0;
 
     return NextResponse.json({
       referrals,
       topReferrers,
       stats: {
-        totalReferralUsers: totalReferralUsers || 0,
-        activeReferralUsers: activeReferralUsers || 0,
-        conversionRate:
-          (totalReferralUsers || 0) > 0
-            ? Math.round(((activeReferralUsers || 0) / (totalReferralUsers || 0)) * 100)
-            : 0,
+        totalReferralUsers,
+        activeReferralUsers,
+        conversionRate,
       },
-      pagination: { page, limit, total, totalPages: Math.ceil(total / limit) },
+      pagination: {
+        page,
+        limit,
+        total,
+        totalPages: Math.ceil(total / limit),
+      },
     });
   } catch (error: unknown) {
     console.error('Admin referrals error:', error);

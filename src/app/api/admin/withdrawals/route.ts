@@ -1,11 +1,17 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { supabaseAdmin } from '@/lib/supabase/admin';
-import { getAuthAdmin } from '@/lib/supabase/helpers';
+import { getDB, mapProfileRow, insertAuditLog, insertNotification, touchUpdated } from '@/lib/db';
+import { getAuthAdmin } from '@/lib/auth';
+
+function getToken(req: NextRequest): string | null {
+  const auth = req.headers.get('authorization');
+  return auth?.startsWith('Bearer ') ? auth.slice(7) : null;
+}
 
 export async function GET(req: NextRequest) {
   try {
-    const auth = await getAuthAdmin();
-    if (!auth) {
+    const token = getToken(req);
+    const admin = getAuthAdmin(token || '');
+    if (!admin) {
       return NextResponse.json({ error: 'Admin access required' }, { status: 403 });
     }
 
@@ -13,24 +19,36 @@ export async function GET(req: NextRequest) {
     const status = searchParams.get('status');
     const page = Number(searchParams.get('page')) || 1;
     const limit = Number(searchParams.get('limit')) || 20;
+    const offset = (page - 1) * limit;
 
-    let query = supabaseAdmin
-      .from('withdrawals')
-      .select('*, profiles!withdrawals_user_id_fkey(full_name, username, phone, bank_name, bank_account, bank_account_name)', { count: 'exact' });
+    const db = getDB();
+
+    // Build WHERE clause
+    let whereClause = '';
+    const params: unknown[] = [];
 
     if (status && ['pending', 'approved', 'rejected', 'paid'].includes(status)) {
-      query = query.eq('status', status);
+      whereClause = 'WHERE w.status = ?';
+      params.push(status);
     }
 
-    const { data: rows, count, error } = await query
-      .order('created_at', { ascending: false })
-      .range((page - 1) * limit, page * limit - 1);
+    // Count total matching withdrawals
+    const countRow = db.prepare(
+      `SELECT COUNT(*) as count FROM withdrawals w ${whereClause}`
+    ).get(...params) as { count: number };
+    const total = countRow?.count || 0;
 
-    if (error) throw error;
-    const total = count || 0;
+    // Fetch paginated withdrawals with user info
+    const rows = db.prepare(
+      `SELECT w.*, u.full_name, u.username, u.phone, u.bank_name, u.bank_account, u.bank_account_name
+       FROM withdrawals w
+       JOIN users u ON w.user_id = u.id
+       ${whereClause}
+       ORDER BY w.created_at DESC
+       LIMIT ? OFFSET ?`
+    ).all(...params, limit, offset) as Array<Record<string, unknown>>;
 
-    // Flatten user data into the withdrawal object to match old Prisma include shape
-    const withdrawals = (rows || []).map((row: Record<string, unknown>) => ({
+    const withdrawals = rows.map((row) => ({
       id: row.id,
       userId: row.user_id,
       wallet: row.wallet,
@@ -38,32 +56,27 @@ export async function GET(req: NextRequest) {
       status: row.status,
       createdAt: row.created_at,
       updatedAt: row.updated_at,
-      user: row.profiles
-        ? {
-            id: (row.profiles as Record<string, unknown>).id,
-            fullName: (row.profiles as Record<string, unknown>).full_name,
-            username: (row.profiles as Record<string, unknown>).username,
-            phone: (row.profiles as Record<string, unknown>).phone,
-            bankName: (row.profiles as Record<string, unknown>).bank_name,
-            bankAccount: (row.profiles as Record<string, unknown>).bank_account,
-            bankAccountName: (row.profiles as Record<string, unknown>).bank_account_name,
-          }
-        : null,
+      user: {
+        id: row.user_id,
+        fullName: row.full_name,
+        username: row.username,
+        phone: row.phone,
+        bankName: row.bank_name,
+        bankAccount: row.bank_account,
+        bankAccountName: row.bank_account_name,
+      },
     }));
 
-    // Calculate totals
-    const { data: pendingRows } = await supabaseAdmin
-      .from('withdrawals')
-      .select('amount')
-      .eq('status', 'pending');
+    // Compute pending and paid totals from ALL withdrawals (not just page)
+    const pendingRow = db.prepare(
+      "SELECT COALESCE(SUM(amount), 0) as total FROM withdrawals WHERE status = 'pending'"
+    ).get() as { total: number };
+    const paidRow = db.prepare(
+      "SELECT COALESCE(SUM(amount), 0) as total FROM withdrawals WHERE status = 'paid'"
+    ).get() as { total: number };
 
-    const { data: paidRows } = await supabaseAdmin
-      .from('withdrawals')
-      .select('amount')
-      .eq('status', 'paid');
-
-    const pendingTotal = (pendingRows || []).reduce((sum: number, r: Record<string, unknown>) => sum + Number(r.amount), 0);
-    const paidTotal = (paidRows || []).reduce((sum: number, r: Record<string, unknown>) => sum + Number(r.amount), 0);
+    const pendingTotal = Number(pendingRow?.total || 0);
+    const paidTotal = Number(paidRow?.total || 0);
 
     return NextResponse.json({
       withdrawals,
@@ -80,8 +93,9 @@ export async function GET(req: NextRequest) {
 
 export async function PUT(req: NextRequest) {
   try {
-    const auth = await getAuthAdmin();
-    if (!auth) {
+    const token = getToken(req);
+    const admin = getAuthAdmin(token || '');
+    if (!admin) {
       return NextResponse.json({ error: 'Admin access required' }, { status: 403 });
     }
 
@@ -94,14 +108,17 @@ export async function PUT(req: NextRequest) {
       return NextResponse.json({ error: 'Action must be approve, reject, or pay' }, { status: 400 });
     }
 
-    // Fetch the withdrawal with the user profile
-    const { data: withdrawal, error: fetchError } = await supabaseAdmin
-      .from('withdrawals')
-      .select('*, profiles(username)')
-      .eq('id', withdrawalId)
-      .single();
+    const db = getDB();
 
-    if (fetchError || !withdrawal) {
+    // Fetch the withdrawal with the user username
+    const withdrawal = db.prepare(
+      `SELECT w.*, u.username
+       FROM withdrawals w
+       JOIN users u ON w.user_id = u.id
+       WHERE w.id = ?`
+    ).get(withdrawalId) as Record<string, unknown> | undefined;
+
+    if (!withdrawal) {
       return NextResponse.json({ error: 'Withdrawal not found' }, { status: 404 });
     }
 
@@ -112,94 +129,80 @@ export async function PUT(req: NextRequest) {
       );
     }
 
-    const profile = withdrawal.profiles as Record<string, unknown> | null;
-    const username = profile?.username || 'unknown';
+    const username = withdrawal.username || 'unknown';
+    const amount = Number(withdrawal.amount);
 
     if (action === 'approve') {
       if (withdrawal.status !== 'pending') {
         return NextResponse.json({ error: 'Only pending withdrawals can be approved' }, { status: 400 });
       }
 
-      const { error } = await supabaseAdmin
-        .from('withdrawals')
-        .update({ status: 'approved' })
-        .eq('id', withdrawalId);
+      db.prepare("UPDATE withdrawals SET status = 'approved', updated_at = datetime('now') WHERE id = ?").run(withdrawalId);
 
-      if (error) throw error;
-
-      await supabaseAdmin.from('notifications').insert({
-        user_id: withdrawal.user_id,
-        title: 'Withdrawal Approved',
-        message: `Your withdrawal of ₦${Number(withdrawal.amount).toLocaleString()} has been approved and will be processed shortly.`,
-        type: 'withdrawal',
-      });
+      insertNotification(
+        db,
+        withdrawal.user_id as string,
+        'Withdrawal Approved',
+        `Your withdrawal of \u20a6${amount.toLocaleString()} has been approved and will be processed shortly.`,
+        'withdrawal'
+      );
     } else if (action === 'reject') {
       if (withdrawal.status !== 'pending') {
         return NextResponse.json({ error: 'Only pending withdrawals can be rejected' }, { status: 400 });
       }
 
-      // Update withdrawal status
-      const { error: updateError } = await supabaseAdmin
-        .from('withdrawals')
-        .update({ status: 'rejected' })
-        .eq('id', withdrawalId);
+      db.prepare("UPDATE withdrawals SET status = 'rejected', updated_at = datetime('now') WHERE id = ?").run(withdrawalId);
 
-      if (updateError) throw updateError;
-
-      // Refund to wallet: find the wallet and increment balance
-      const { data: wallet } = await supabaseAdmin
-        .from('wallets')
-        .select('id, balance')
-        .eq('user_id', withdrawal.user_id)
-        .eq('type', withdrawal.wallet)
-        .single();
+      // Refund to wallet
+      const wallet = db.prepare(
+        'SELECT id, balance FROM wallets WHERE user_id = ? AND type = ?'
+      ).get(withdrawal.user_id, withdrawal.wallet) as { id: string; balance: number } | undefined;
 
       if (wallet) {
-        await supabaseAdmin
-          .from('wallets')
-          .update({ balance: Number(wallet.balance) + Number(withdrawal.amount) })
-          .eq('id', wallet.id);
+        db.prepare('UPDATE wallets SET balance = ?, updated_at = datetime(\'now\') WHERE id = ?').run(
+          Number(wallet.balance) + amount,
+          wallet.id
+        );
       }
 
-      await supabaseAdmin.from('notifications').insert({
-        user_id: withdrawal.user_id,
-        title: 'Withdrawal Rejected',
-        message: `Your withdrawal of ₦${Number(withdrawal.amount).toLocaleString()} was rejected. The amount has been refunded to your ${withdrawal.wallet} wallet.`,
-        type: 'withdrawal',
-      });
+      insertNotification(
+        db,
+        withdrawal.user_id as string,
+        'Withdrawal Rejected',
+        `Your withdrawal of \u20a6${amount.toLocaleString()} was rejected. The amount has been refunded to your ${withdrawal.wallet} wallet.`,
+        'withdrawal'
+      );
     } else if (action === 'pay') {
       if (withdrawal.status !== 'approved') {
         return NextResponse.json({ error: 'Only approved withdrawals can be marked as paid' }, { status: 400 });
       }
 
-      const { error } = await supabaseAdmin
-        .from('withdrawals')
-        .update({ status: 'paid' })
-        .eq('id', withdrawalId);
+      db.prepare("UPDATE withdrawals SET status = 'paid', updated_at = datetime('now') WHERE id = ?").run(withdrawalId);
 
-      if (error) throw error;
-
-      await supabaseAdmin.from('notifications').insert({
-        user_id: withdrawal.user_id,
-        title: 'Withdrawal Paid ✅',
-        message: `Your withdrawal of ₦${Number(withdrawal.amount).toLocaleString()} has been paid to your bank account.`,
-        type: 'withdrawal',
-      });
+      insertNotification(
+        db,
+        withdrawal.user_id as string,
+        'Withdrawal Paid \u2705',
+        `Your withdrawal of \u20a6${amount.toLocaleString()} has been paid to your bank account.`,
+        'withdrawal'
+      );
     }
 
     // Audit log
-    await supabaseAdmin.from('audit_logs').insert({
-      user_id: auth.user.id,
-      action: `WITHDRAWAL_${action.toUpperCase()}`,
-      details: `${action}d withdrawal ${withdrawalId} of ₦${Number(withdrawal.amount).toLocaleString()} for ${username}`,
-    });
+    insertAuditLog(
+      db,
+      admin.id,
+      `WITHDRAWAL_${action.toUpperCase()}`,
+      `${action}d withdrawal ${withdrawalId} of \u20a6${amount.toLocaleString()} for ${username}`
+    );
 
     // Fetch updated withdrawal
-    const { data: updated } = await supabaseAdmin
-      .from('withdrawals')
-      .select('*')
-      .eq('id', withdrawalId)
-      .single();
+    const updated = db.prepare(
+      `SELECT w.*, u.full_name, u.username, u.phone, u.bank_name, u.bank_account, u.bank_account_name
+       FROM withdrawals w
+       JOIN users u ON w.user_id = u.id
+       WHERE w.id = ?`
+    ).get(withdrawalId) as Record<string, unknown>;
 
     return NextResponse.json({ withdrawal: updated, message: `Withdrawal ${action}d successfully` });
   } catch (error: unknown) {

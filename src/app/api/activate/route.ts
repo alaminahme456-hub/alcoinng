@@ -1,55 +1,30 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getAuthUser } from '@/lib/supabase/helpers';
-import { supabaseAdmin } from '@/lib/supabase/admin';
+import { getDB, insertAuditLog } from '@/lib/db';
+import { getAuthUser } from '@/lib/auth';
+
+function getToken(req: NextRequest): string | null {
+  const auth = req.headers.get('authorization');
+  return auth?.startsWith('Bearer ') ? auth.slice(7) : null;
+}
 
 export async function POST(req: NextRequest) {
   try {
-    const auth = await getAuthUser();
+    const auth = getAuthUser(getToken(req)!);
     if (!auth) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
     const { code } = await req.json();
-    if (!code) {
-      return NextResponse.json({ error: 'Activation code is required' }, { status: 400 });
-    }
+    if (!code) return NextResponse.json({ error: 'Activation code is required' }, { status: 400 });
+    if (auth.profile.isActivated) return NextResponse.json({ error: 'Account is already activated' }, { status: 400 });
 
-    if (auth.profile.is_activated) {
-      return NextResponse.json({ error: 'Account is already activated' }, { status: 400 });
-    }
+    const db = getDB();
+    const activationCode = db.prepare('SELECT * FROM activation_codes WHERE code = ? AND status = ?').get(code.toUpperCase(), 'unused') as Record<string, unknown> | undefined;
 
-    const { data: activationCode } = await supabaseAdmin
-      .from('activation_codes')
-      .select('*')
-      .eq('code', code.toUpperCase())
-      .single();
-
-    if (!activationCode) {
-      return NextResponse.json({ error: 'Invalid activation code' }, { status: 404 });
-    }
-
-    if (activationCode.status !== 'unused') {
-      return NextResponse.json({ error: 'Activation code has already been used' }, { status: 400 });
-    }
+    if (!activationCode) return NextResponse.json({ error: 'Invalid activation code' }, { status: 404 });
 
     const now = new Date().toISOString();
-
-    // Update profile and code in a single RPC-like flow
-    await supabaseAdmin.from('profiles').update({
-      is_activated: true,
-      activated_at: now,
-      activation_code_id: activationCode.id,
-    }).eq('id', auth.user.id);
-
-    await supabaseAdmin.from('activation_codes').update({
-      status: 'used',
-      redeemed_by: auth.user.id,
-      redeemed_at: now,
-    }).eq('id', activationCode.id);
-
-    await supabaseAdmin.from('audit_logs').insert({
-      user_id: auth.user.id,
-      action: 'ACTIVATE_ACCOUNT',
-      details: `Activated with code ${activationCode.code}`,
-    });
+    db.prepare('UPDATE users SET is_activated = 1, activated_at = ?, activation_code_id = ?, updated_at = datetime(\'now\') WHERE id = ?').run(now, activationCode.id, auth.id);
+    db.prepare('UPDATE activation_codes SET status = ?, redeemed_by = ?, redeemed_at = ? WHERE id = ?').run('used', auth.id, now, activationCode.id);
+    insertAuditLog(db, auth.id, 'ACTIVATE_ACCOUNT', `Activated with code ${activationCode.code}`);
 
     return NextResponse.json({ message: 'Account activated successfully' });
   } catch (error: unknown) {
