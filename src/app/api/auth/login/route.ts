@@ -11,16 +11,17 @@ export async function POST(req: NextRequest) {
     }
 
     // Find user by email or username
-    // First try by email via auth
-    const { data: authUsers, error: listError } = await supabaseAdmin.auth.admin.listUsers({
-      filters: loginId.includes('@') ? { email: loginId.toLowerCase() } : undefined,
-      perPage: 1000,
-    });
+    let targetUser;
 
-    let targetUser = authUsers?.users.find(u => u.email === loginId.toLowerCase());
-
-    // If not found by email, try by username via profiles
-    if (!targetUser) {
+    if (loginId.includes('@')) {
+      // Search by email via auth.users
+      const { data: authUsers } = await supabaseAdmin.auth.admin.listUsers({
+        filters: { email: loginId.toLowerCase() },
+        perPage: 1,
+      });
+      targetUser = authUsers?.users[0];
+    } else {
+      // Search by username via profiles, then get auth user
       const { data: profile } = await supabaseAdmin
         .from('profiles')
         .select('id')
@@ -37,7 +38,14 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Invalid credentials' }, { status: 401 });
     }
 
-    // Verify password by signing in with the admin client
+    // Auto-confirm email if not confirmed (handles users stuck from previous email_confirm: false)
+    if (!targetUser.email_confirmed_at) {
+      await supabaseAdmin.auth.admin.updateUserById(targetUser.id, {
+        email_confirm: true,
+      });
+    }
+
+    // Verify password by signing in
     const { data: signInData, error: signInError } = await supabaseAdmin.auth.signInWithPassword({
       email: targetUser.email!,
       password,
