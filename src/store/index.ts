@@ -2,7 +2,7 @@ import { create } from 'zustand';
 import { createClient } from '@/lib/supabase/client';
 
 export type ViewName = 
-  | 'login' | 'register'
+  | 'login' | 'register' | 'verify-otp'
   | 'dashboard' | 'activate' | 'deposit'
   | 'ads' | 'tasks' | 'market' | 'referral' | 'withdraw'
   | 'notifications' | 'profile' | 'settings'
@@ -32,6 +32,14 @@ interface WalletData {
   profit: number;
 }
 
+interface PendingRegistration {
+  email: string;
+  password: string;
+  fullName: string;
+  username: string;
+  phone: string;
+}
+
 interface AppState {
   view: ViewName;
   setView: (v: ViewName) => void;
@@ -45,6 +53,8 @@ interface AppState {
   setUnreadCount: (n: number) => void;
   sidebarOpen: boolean;
   setSidebarOpen: (o: boolean) => void;
+  pendingRegistration: PendingRegistration | null;
+  setPendingRegistration: (p: PendingRegistration | null) => void;
   logout: () => void;
 }
 
@@ -65,6 +75,8 @@ export const useAppStore = create<AppState>((set) => ({
   setUnreadCount: (n) => set({ unreadCount: n }),
   sidebarOpen: false,
   setSidebarOpen: (o) => set({ sidebarOpen: o }),
+  pendingRegistration: null,
+  setPendingRegistration: (p) => set({ pendingRegistration: p }),
   logout: () => {
     localStorage.removeItem('alcoin_token');
     set({ user: null, token: null, view: 'login', wallets: { reward: 0, deposit: 0, profit: 0 } });

@@ -1,16 +1,18 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useAppStore, apiFetch, ViewName } from '@/store';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Coins, Mail, Lock, User, Phone, UserPlus, ArrowRight, Eye, EyeOff } from 'lucide-react';
+import { InputOTP, InputOTPGroup, InputOTPSlot, InputOTPSeparator } from '@/components/ui/input-otp';
+import { Coins, Mail, Lock, User, Phone, UserPlus, ArrowRight, Eye, EyeOff, ShieldCheck, RefreshCw, ArrowLeft } from 'lucide-react';
 
 export default function AuthView() {
-  const { view, setView, setToken, setUser } = useAppStore();
+  const { view, setView, setToken, setUser, pendingRegistration, setPendingRegistration } = useAppStore();
   const isLogin = view === 'login';
+  const isVerifyOtp = view === 'verify-otp';
 
   // Login state
   const [loginId, setLoginId] = useState('');
@@ -30,6 +32,30 @@ export default function AuthView() {
   const [regLoading, setRegLoading] = useState(false);
   const [regError, setRegError] = useState('');
   const [showRegPw, setShowRegPw] = useState(false);
+
+  // OTP state
+  const [otp, setOtp] = useState('');
+  const [otpLoading, setOtpLoading] = useState(false);
+  const [otpError, setOtpError] = useState('');
+  const [otpSuccess, setOtpSuccess] = useState(false);
+  const [resendLoading, setResendLoading] = useState(false);
+  const [resendCooldown, setResendCooldown] = useState(0);
+
+  // Countdown timer for resend
+  useEffect(() => {
+    if (resendCooldown <= 0) return;
+    const timer = setInterval(() => {
+      setResendCooldown((prev) => prev - 1);
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [resendCooldown]);
+
+  // If there's pending registration data and we're on verify-otp, start cooldown
+  useEffect(() => {
+    if (isVerifyOtp && resendCooldown === 0) {
+      setResendCooldown(60);
+    }
+  }, [isVerifyOtp]);
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -67,14 +93,92 @@ export default function AuthView() {
         method: 'POST',
         body: JSON.stringify({ fullName, username, email, phone, password, referralCode: referralCode || undefined }),
       });
-      setToken(data.token);
-      setUser(data.user);
-      setView('dashboard');
+
+      if (data.requiresOtp) {
+        // Save pending registration and switch to OTP view
+        setPendingRegistration({ email, password, fullName, username, phone });
+        setUser(data.user);
+        setView('verify-otp');
+      } else {
+        // Email confirmation is off - go straight to dashboard
+        setToken(data.token);
+        setUser(data.user);
+        if (data.user.role === 'admin') {
+          setView('admin-dashboard');
+        } else {
+          setView('dashboard');
+        }
+      }
     } catch (err: any) {
       setRegError(err.message || 'Registration failed');
     } finally {
       setRegLoading(false);
     }
+  };
+
+  const handleVerifyOtp = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!pendingRegistration) return;
+
+    setOtpLoading(true);
+    setOtpError('');
+    setOtpSuccess(false);
+
+    try {
+      const data = await apiFetch('/api/auth/verify-otp', {
+        method: 'POST',
+        body: JSON.stringify({
+          email: pendingRegistration.email,
+          otp,
+          password: pendingRegistration.password,
+        }),
+      });
+
+      setOtpSuccess(true);
+      setToken(data.token);
+      setUser(data.user);
+      setPendingRegistration(null);
+
+      // Brief success animation then redirect
+      setTimeout(() => {
+        if (data.user.role === 'admin') {
+          setView('admin-dashboard');
+        } else {
+          setView('dashboard');
+        }
+      }, 1200);
+    } catch (err: any) {
+      setOtpError(err.message || 'OTP verification failed');
+    } finally {
+      setOtpLoading(false);
+    }
+  };
+
+  const handleResendOtp = async () => {
+    if (!pendingRegistration || resendCooldown > 0) return;
+
+    setResendLoading(true);
+    setOtpError('');
+    try {
+      await apiFetch('/api/auth/verify-otp', {
+        method: 'PUT',
+        body: JSON.stringify({ email: pendingRegistration.email }),
+      });
+      setResendCooldown(60);
+    } catch (err: any) {
+      setOtpError(err.message || 'Failed to resend OTP');
+    } finally {
+      setResendLoading(false);
+    }
+  };
+
+  const handleBackToRegister = () => {
+    setOtp('');
+    setOtpError('');
+    setOtpSuccess(false);
+    setPendingRegistration(null);
+    setDirection(-1);
+    setView('register');
   };
 
   const slideVariants = {
@@ -86,8 +190,15 @@ export default function AuthView() {
   const [direction, setDirection] = useState(1);
 
   const switchView = (target: ViewName) => {
-    setDirection(target === 'register' ? 1 : -1);
+    setDirection(target === 'register' || target === 'verify-otp' ? 1 : -1);
     setView(target);
+  };
+
+  // Mask email for display
+  const maskEmail = (email: string) => {
+    const [user, domain] = email.split('@');
+    if (user.length <= 2) return email;
+    return user[0] + '***' + user[user.length - 1] + '@' + domain;
   };
 
   return (
@@ -109,7 +220,143 @@ export default function AuthView() {
         {/* Form Container */}
         <div className="glass rounded-2xl p-6 sm:p-8 overflow-hidden relative">
           <AnimatePresence mode="wait" custom={direction}>
-            {isLogin ? (
+            {isVerifyOtp ? (
+              <motion.form
+                key="verify-otp"
+                custom={direction}
+                variants={slideVariants}
+                initial="enter"
+                animate="center"
+                exit="exit"
+                transition={{ type: 'spring', stiffness: 300, damping: 30 }}
+                onSubmit={handleVerifyOtp}
+                className="space-y-6"
+              >
+                <div className="text-center mb-2">
+                  <motion.div
+                    initial={{ scale: 0 }}
+                    animate={{ scale: 1 }}
+                    transition={{ type: 'spring', stiffness: 200, damping: 15, delay: 0.1 }}
+                    className="inline-flex items-center justify-center w-14 h-14 rounded-full bg-gold/10 mb-4"
+                  >
+                    <ShieldCheck className="w-7 h-7 text-gold" />
+                  </motion.div>
+                  <h2 className="text-xl font-semibold">Verify Your Email</h2>
+                  <p className="text-muted-foreground text-sm mt-2">
+                    We sent a verification code to
+                  </p>
+                  <p className="text-foreground font-medium text-sm mt-1">
+                    {pendingRegistration ? maskEmail(pendingRegistration.email) : 'your email'}
+                  </p>
+                </div>
+
+                {otpError && (
+                  <motion.div
+                    initial={{ opacity: 0, y: -10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    className="p-3 rounded-lg bg-destructive/10 border border-destructive/20 text-destructive text-sm"
+                  >
+                    {otpError}
+                  </motion.div>
+                )}
+
+                {otpSuccess && (
+                  <motion.div
+                    initial={{ opacity: 0, y: -10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    className="p-3 rounded-lg bg-green-500/10 border border-green-500/20 text-green-400 text-sm text-center"
+                  >
+                    Email verified successfully! Redirecting...
+                  </motion.div>
+                )}
+
+                {/* OTP Input */}
+                <div className="flex justify-center py-2">
+                  <InputOTP
+                    maxLength={6}
+                    value={otp}
+                    onChange={setOtp}
+                    disabled={otpLoading || otpSuccess}
+                    render={({ slots }) => (
+                      <InputOTPGroup>
+                        {slots.slice(0, 3).map((slot, i) => (
+                          <InputOTPSlot key={i} {...slot} index={i} className="h-12 w-12 text-lg bg-white/5 border-white/10 data-[active=true]:border-gold data-[active=true]:ring-gold/30" />
+                        ))}
+                        <InputOTPSeparator className="mx-1" />
+                        {slots.slice(3, 6).map((slot, i) => (
+                          <InputOTPSlot key={i + 3} {...slot} index={i + 3} className="h-12 w-12 text-lg bg-white/5 border-white/10 data-[active=true]:border-gold data-[active=true]:ring-gold/30" />
+                        ))}
+                      </InputOTPGroup>
+                    )}
+                  />
+                </div>
+
+                <p className="text-center text-xs text-muted-foreground">
+                  Enter the 6-digit code sent to your email
+                </p>
+
+                <Button
+                  type="submit"
+                  disabled={otpLoading || otp.length !== 6 || otpSuccess}
+                  className="w-full gradient-gold text-gold-foreground font-semibold h-12 hover:opacity-90 transition-opacity"
+                >
+                  {otpLoading ? (
+                    <motion.div
+                      animate={{ rotate: 360 }}
+                      transition={{ repeat: Infinity, duration: 1, ease: 'linear' }}
+                      className="w-5 h-5 border-2 border-gold-foreground/30 border-t-gold-foreground rounded-full"
+                    />
+                  ) : (
+                    <span className="flex items-center justify-center gap-2">
+                      <ShieldCheck className="w-4 h-4" />
+                      Verify OTP
+                    </span>
+                  )}
+                </Button>
+
+                {/* Resend OTP */}
+                <div className="text-center">
+                  <p className="text-sm text-muted-foreground">
+                    Didn&apos;t receive the code?{' '}
+                    {resendCooldown > 0 ? (
+                      <span className="text-muted-foreground/60">
+                        Resend in {resendCooldown}s
+                      </span>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={handleResendOtp}
+                        disabled={resendLoading}
+                        className="text-gold hover:underline font-medium inline-flex items-center gap-1 disabled:opacity-50"
+                      >
+                        {resendLoading ? (
+                          <motion.div
+                            animate={{ rotate: 360 }}
+                            transition={{ repeat: Infinity, duration: 1, ease: 'linear' }}
+                            className="w-3 h-3 border-2 border-gold/30 border-t-gold rounded-full"
+                          />
+                        ) : (
+                          <RefreshCw className="w-3 h-3" />
+                        )}
+                        Resend Code
+                      </button>
+                    )}
+                  </p>
+                </div>
+
+                {/* Back to register */}
+                <div className="text-center">
+                  <button
+                    type="button"
+                    onClick={handleBackToRegister}
+                    className="text-sm text-muted-foreground hover:text-foreground transition-colors inline-flex items-center gap-1"
+                  >
+                    <ArrowLeft className="w-3 h-3" />
+                    Back to Register
+                  </button>
+                </div>
+              </motion.form>
+            ) : isLogin ? (
               <motion.form
                 key="login"
                 custom={direction}

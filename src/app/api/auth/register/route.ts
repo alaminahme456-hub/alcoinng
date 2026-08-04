@@ -132,21 +132,20 @@ export async function POST(req: NextRequest) {
     };
 
     // signUp returns a session when email confirmation is off.
-    // If no session (email confirmation is on), sign in to get a token.
+    // If no session (email confirmation is on), user needs to verify OTP first.
     let token = signUpData.session?.access_token || null;
+
     if (!token) {
-      const { data: sessionData, error: signInError } = await supabaseAnon.auth.signInWithPassword({
-        email,
-        password,
-      });
-      if (signInError) {
-        console.error('Auto sign-in after signup error:', signInError.message);
-      } else {
-        token = sessionData?.session?.access_token || null;
-      }
+      // Email confirmation is ON - return pending user info so frontend can show OTP screen
+      return NextResponse.json({
+        user,
+        token: null,
+        requiresOtp: true,
+        pendingEmail: email,
+      }, { status: 201 });
     }
 
-    return NextResponse.json({ user, token }, { status: 201 });
+    return NextResponse.json({ user, token, requiresOtp: false }, { status: 201 });
   } catch (error: unknown) {
     console.error('Register error:', error);
     const message = error instanceof Error ? error.message : 'Registration failed';

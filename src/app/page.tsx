@@ -42,6 +42,7 @@ function ViewRouter() {
   const views: Record<ViewName, React.ReactNode> = {
     login: <AuthView />,
     register: <AuthView />,
+    'verify-otp': <AuthView />,
     dashboard: <DashboardView />,
     activate: <ActivateView />,
     deposit: <DepositView />,
