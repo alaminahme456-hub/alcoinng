@@ -1,15 +1,21 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabase/admin';
-import { createClient } from '@supabase/supabase-js';
 
-// Anon client for auth operations (server-side, cookie-less)
-const supabaseAnon = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-);
+function getSupabaseAnon() {
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+  if (!url || !key) return null;
+  const { createClient } = require('@supabase/supabase-js');
+  return createClient(url, key);
+}
 
 export async function POST(req: NextRequest) {
   try {
+    const supabaseAnon = getSupabaseAnon();
+    if (!supabaseAnon) {
+      return NextResponse.json({ error: 'Server configuration error' }, { status: 500 });
+    }
+
     const { email, username, loginId, password } = await req.json();
     const loginEmail = email || loginId;
     const loginUsername = username || loginId;

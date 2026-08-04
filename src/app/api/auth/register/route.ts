@@ -1,16 +1,22 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabase/admin';
-import { createClient } from '@supabase/supabase-js';
 import { generateReferralCode } from '@/lib/auth';
 
-// Anon client for auth operations (server-side, cookie-less)
-const supabaseAnon = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-);
+function getSupabaseAnon() {
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+  if (!url || !key) return null;
+  const { createClient } = require('@supabase/supabase-js');
+  return createClient(url, key);
+}
 
 export async function POST(req: NextRequest) {
   try {
+    const supabaseAnon = getSupabaseAnon();
+    if (!supabaseAnon) {
+      return NextResponse.json({ error: 'Server configuration error' }, { status: 500 });
+    }
+
     const { fullName, username, email, phone, password, referralCode } = await req.json();
 
     if (!fullName || !username || !email || !phone || !password) {
@@ -18,11 +24,16 @@ export async function POST(req: NextRequest) {
     }
 
     // Check for existing username
-    const { data: existingUsername } = await supabaseAdmin
+    const { data: existingUsername, error: checkErr } = await supabaseAdmin
       .from('profiles')
       .select('id')
       .eq('username', username)
       .single();
+
+    if (checkErr && checkErr.code !== 'PGRST116') {
+      console.error('Username check error:', checkErr);
+      return NextResponse.json({ error: 'Failed to check username' }, { status: 500 });
+    }
     if (existingUsername) {
       return NextResponse.json({ error: 'Username already taken' }, { status: 409 });
     }
@@ -30,12 +41,12 @@ export async function POST(req: NextRequest) {
     // Validate referral code if provided
     let referrerId: string | undefined;
     if (referralCode) {
-      const { data: referrer } = await supabaseAdmin
+      const { data: referrer, error: refErr } = await supabaseAdmin
         .from('profiles')
         .select('id')
         .eq('referral_code', referralCode)
         .single();
-      if (!referrer) {
+      if (refErr || !referrer) {
         return NextResponse.json({ error: 'Invalid referral code' }, { status: 400 });
       }
       referrerId = referrer.id;
@@ -57,7 +68,7 @@ export async function POST(req: NextRequest) {
         .single();
     }
 
-    // Sign up via anon client (respects Supabase email confirmation setting)
+    // Sign up via anon client
     const { data: signUpData, error: signUpError } = await supabaseAnon.auth.signUp({
       email,
       password,
