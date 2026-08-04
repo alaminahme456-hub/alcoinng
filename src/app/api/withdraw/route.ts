@@ -1,16 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getDB, insertAuditLog, insertNotification } from '@/lib/db';
-import { getAuthUser } from '@/lib/auth';
-
-function getToken(req: NextRequest): string | null {
-  const auth = req.headers.get('authorization');
-  return auth?.startsWith('Bearer ') ? auth.slice(7) : null;
-}
+import { supabaseAdmin } from '@/lib/supabase/admin';
+import { insertAuditLog, insertNotification } from '@/lib/db';
+import { requireAuth, isAuthUser } from '@/lib/req-helpers';
 
 export async function POST(req: NextRequest) {
   try {
-    const auth = getAuthUser(getToken(req)!);
-    if (!auth) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    const auth = await requireAuth(req);
+    if (!isAuthUser(auth)) return auth;
 
     const { wallet, amount } = await req.json();
     if (!wallet || !amount) return NextResponse.json({ error: 'Wallet type and amount are required' }, { status: 400 });
@@ -23,37 +19,56 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Please update your bank details before withdrawing' }, { status: 400 });
     }
 
-    const db = getDB();
-
     // Check minimum amounts for reward wallet
     if (wallet === 'reward') {
       const oneWeekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
-      const weekRow = db.prepare('SELECT COALESCE(SUM(amount), 0) as total FROM withdrawals WHERE user_id = ? AND wallet = ? AND created_at >= ? AND status IN (?, ?, ?)').get(auth.id, 'reward', oneWeekAgo, 'pending', 'approved', 'paid') as { total: number };
+      const { count: weekCount } = await supabaseAdmin
+        .from('withdrawals')
+        .select('*', { count: 'exact', head: true })
+        .eq('user_id', auth.id)
+        .eq('wallet', 'reward')
+        .gte('created_at', oneWeekAgo)
+        .in('status', ['pending', 'approved', 'paid']);
 
-      if (weekRow.total === 0 && numAmount < 2000) {
+      if ((!weekCount || weekCount === 0) && numAmount < 2000) {
         return NextResponse.json({ error: 'Minimum weekly withdrawal for reward wallet is \u20a62,000' }, { status: 400 });
       }
 
       const oneMonthAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
-      const monthRow = db.prepare('SELECT COALESCE(SUM(amount), 0) as total FROM withdrawals WHERE user_id = ? AND wallet = ? AND created_at >= ? AND status IN (?, ?, ?)').get(auth.id, 'reward', oneMonthAgo, 'pending', 'approved', 'paid') as { total: number };
+      const { count: monthCount } = await supabaseAdmin
+        .from('withdrawals')
+        .select('*', { count: 'exact', head: true })
+        .eq('user_id', auth.id)
+        .eq('wallet', 'reward')
+        .gte('created_at', oneMonthAgo)
+        .in('status', ['pending', 'approved', 'paid']);
 
-      if (monthRow.total === 0 && numAmount < 8000) {
+      if ((!monthCount || monthCount === 0) && numAmount < 8000) {
         return NextResponse.json({ error: 'Minimum monthly withdrawal for reward wallet is \u20a68,000' }, { status: 400 });
       }
     }
 
     // Check wallet balance
-    const walletRow = db.prepare('SELECT * FROM wallets WHERE user_id = ? AND type = ?').get(auth.id, wallet) as Record<string, unknown> | undefined;
+    const { data: walletRow } = await supabaseAdmin
+      .from('wallets')
+      .select('*')
+      .eq('user_id', auth.id)
+      .eq('type', wallet)
+      .single();
+
     if (!walletRow || Number(walletRow.balance) < numAmount) {
       return NextResponse.json({ error: 'Insufficient balance' }, { status: 400 });
     }
 
-    const id = crypto.randomUUID();
-    db.prepare('INSERT INTO withdrawals (id, user_id, wallet, amount) VALUES (?, ?, ?, ?)').run(id, auth.id, wallet, numAmount);
-    insertNotification(db, auth.id, 'Withdrawal Requested', `Your withdrawal of \u20a6${numAmount.toLocaleString()} from ${wallet} wallet is pending review.`, 'withdrawal');
-    insertAuditLog(db, auth.id, 'WITHDRAWAL_REQUEST', `Requested \u20a6${numAmount.toLocaleString()} from ${wallet} wallet`);
+    const { data: withdrawal } = await supabaseAdmin.from('withdrawals').insert({
+      user_id: auth.id,
+      wallet,
+      amount: numAmount,
+    }).select().single();
 
-    const withdrawal = db.prepare('SELECT * FROM withdrawals WHERE id = ?').get(id);
+    await insertNotification(auth.id, 'Withdrawal Requested', `Your withdrawal of \u20a6${numAmount.toLocaleString()} from ${wallet} wallet is pending review.`, 'withdrawal');
+    await insertAuditLog(auth.id, 'WITHDRAWAL_REQUEST', `Requested \u20a6${numAmount.toLocaleString()} from ${wallet} wallet`);
+
     return NextResponse.json({ withdrawal, message: 'Withdrawal request submitted' }, { status: 201 });
   } catch (error: unknown) {
     console.error('Withdraw error:', error);
@@ -64,30 +79,32 @@ export async function POST(req: NextRequest) {
 
 export async function GET(req: NextRequest) {
   try {
-    const auth = getAuthUser(getToken(req)!);
-    if (!auth) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    const auth = await requireAuth(req);
+    if (!isAuthUser(auth)) return auth;
 
     const { searchParams } = new URL(req.url);
     const status = searchParams.get('status');
     const page = Number(searchParams.get('page')) || 1;
     const limit = Number(searchParams.get('limit')) || 20;
-    const offset = (page - 1) * limit;
-    const db = getDB();
 
-    let where = 'user_id = ?';
-    const params: unknown[] = [auth.id];
+    let query = supabaseAdmin
+      .from('withdrawals')
+      .select('*', { count: 'exact' })
+      .eq('user_id', auth.id)
+      .order('created_at', { ascending: false })
+      .range((page - 1) * limit, page * limit - 1);
 
     if (status && ['pending', 'approved', 'rejected', 'paid'].includes(status)) {
-      where += ' AND status = ?';
-      params.push(status);
+      query = query.eq('status', status);
     }
 
-    const totalRow = db.prepare(`SELECT COUNT(*) as count FROM withdrawals WHERE ${where}`).get(...params) as { count: number };
-    const withdrawals = db.prepare(`SELECT * FROM withdrawals WHERE ${where} ORDER BY created_at DESC LIMIT ? OFFSET ?`).all(...params, limit, offset);
+    const { data: withdrawals, count, error } = await query;
+
+    if (error) throw new Error(error.message);
 
     return NextResponse.json({
       withdrawals: withdrawals || [],
-      pagination: { page, limit, total: totalRow?.count || 0, totalPages: Math.ceil((totalRow?.count || 0) / limit) },
+      pagination: { page, limit, total: count || 0, totalPages: Math.ceil((count || 0) / limit) },
     });
   } catch (error: unknown) {
     console.error('Fetch withdrawals error:', error);

@@ -1,20 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getDB, ensureWallets } from '@/lib/db';
-import { getAuthUser } from '@/lib/auth';
-
-function getToken(req: NextRequest): string | null {
-  const auth = req.headers.get('authorization');
-  return auth?.startsWith('Bearer ') ? auth.slice(7) : null;
-}
+import { ensureWallets } from '@/lib/db';
+import { requireAuth, isAuthUser } from '@/lib/req-helpers';
 
 export async function GET(req: NextRequest) {
   try {
-    const token = getToken(req);
-    const auth = getAuthUser(token!);
-    if (!auth) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    const auth = await requireAuth(req);
+    if (!isAuthUser(auth)) return auth;
 
-    const db = getDB();
-    const wallets = ensureWallets(db, auth.id) as Array<Record<string, unknown>>;
+    const wallets = await ensureWallets(auth.id);
 
     const walletMap: Record<string, { id: string; type: string; balance: number }> = {};
     for (const w of wallets) {

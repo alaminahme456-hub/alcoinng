@@ -1,25 +1,22 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getDB } from '@/lib/db';
-import { getAuthUser } from '@/lib/auth';
-
-function getToken(req: NextRequest): string | null {
-  const auth = req.headers.get('authorization');
-  return auth?.startsWith('Bearer ') ? auth.slice(7) : null;
-}
+import { supabaseAdmin } from '@/lib/supabase/admin';
+import { requireAuth, isAuthUser } from '@/lib/req-helpers';
 
 export async function GET(req: NextRequest) {
   try {
-    const token = getToken(req);
-    const auth = getAuthUser(token!);
-    if (!auth) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    const auth = await requireAuth(req);
+    if (!isAuthUser(auth)) return auth;
 
-    const db = getDB();
-    const referrals = db.prepare(
-      'SELECT id, full_name, username, is_activated, created_at FROM users WHERE referred_by = ? ORDER BY created_at DESC'
-    ).all(auth.id) as Array<Record<string, unknown>>;
+    const { data: referrals, error } = await supabaseAdmin
+      .from('profiles')
+      .select('id, full_name, username, is_activated, created_at')
+      .eq('referred_by', auth.id)
+      .order('created_at', { ascending: false });
 
-    const totalReferrals = referrals.length;
-    const activeReferrals = referrals.filter((r) => Boolean(r.is_activated)).length;
+    if (error) throw new Error(error.message);
+
+    const totalReferrals = referrals?.length || 0;
+    const activeReferrals = referrals?.filter((r) => r.is_activated).length || 0;
 
     return NextResponse.json({
       referralCode: auth.profile.referralCode,
@@ -27,7 +24,7 @@ export async function GET(req: NextRequest) {
       totalReferrals,
       activeReferrals,
       referralEarnings: 0,
-      referrals: referrals.map(r => ({
+      referrals: (referrals || []).map(r => ({
         id: r.id,
         fullName: r.full_name,
         username: r.username,

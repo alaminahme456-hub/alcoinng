@@ -1,52 +1,8 @@
-import { SignJWT, jwtVerify } from 'jose';
-import bcrypt from 'bcryptjs';
-import { getDB, mapProfileRow } from './db';
+import { supabaseAdmin } from './supabase/admin';
+import { mapProfileRow } from './db';
 
 // ============================================================
-// JWT helpers
-// ============================================================
-
-function getJWTSecret(): Uint8Array {
-  const secret = process.env.JWT_SECRET;
-  if (!secret) throw new Error('JWT_SECRET environment variable is not set');
-  return new TextEncoder().encode(secret);
-}
-
-export async function signToken(payload: { userId: string; role: string; email: string }): Promise<string> {
-  return new SignJWT({ userId: payload.userId, role: payload.role, email: payload.email })
-    .setProtectedHeader({ alg: 'HS256' })
-    .setIssuedAt()
-    .setExpirationTime('30d')
-    .sign(getJWTSecret());
-}
-
-export async function verifyToken(token: string): Promise<{ userId: string; role: string; email: string } | null> {
-  try {
-    const { payload } = await jwtVerify(token, getJWTSecret());
-    return {
-      userId: payload.userId as string,
-      role: payload.role as string,
-      email: payload.email as string,
-    };
-  } catch {
-    return null;
-  }
-}
-
-// ============================================================
-// Password helpers
-// ============================================================
-
-export async function hashPassword(password: string): Promise<string> {
-  return bcrypt.hash(password, 12);
-}
-
-export async function comparePassword(password: string, hash: string): Promise<boolean> {
-  return bcrypt.compare(password, hash);
-}
-
-// ============================================================
-// Auth helpers for API routes (replaces getAuthUser / getAuthAdmin)
+// Auth helpers for API routes
 // ============================================================
 
 export interface AuthUser {
@@ -56,41 +12,35 @@ export interface AuthUser {
   profile: ReturnType<typeof mapProfileRow>;
 }
 
-export function getAuthUser(token: string): AuthUser | null {
-  const payload = verifyTokenSync(token);
-  if (!payload) return null;
-
-  const db = getDB();
-  const row = db.prepare('SELECT * FROM users WHERE id = ?').get(payload.userId) as Record<string, unknown> | undefined;
-  if (!row) return null;
-
-  return {
-    id: row.id as string,
-    email: row.email as string,
-    role: row.role as string,
-    profile: mapProfileRow(row),
-  };
-}
-
-export function getAuthAdmin(token: string): AuthUser | null {
-  const auth = getAuthUser(token);
-  if (!auth || auth.role !== 'admin') return null;
-  return auth;
-}
-
-// Synchronous JWT verify
-function verifyTokenSync(token: string): { userId: string; role: string; email: string } | null {
+export async function getAuthUser(token: string): Promise<AuthUser | null> {
   try {
-    const secret = getJWTSecret();
-    const { payload } = jwtVerify(token, secret);
+    // Verify the JWT with Supabase
+    const { data: { user }, error } = await supabaseAdmin.auth.getUser(token);
+    if (error || !user) return null;
+
+    const { data: profile } = await supabaseAdmin
+      .from('profiles')
+      .select('*')
+      .eq('id', user.id)
+      .single();
+
+    if (!profile) return null;
+
     return {
-      userId: payload.userId as string,
-      role: payload.role as string,
-      email: payload.email as string,
+      id: user.id,
+      email: user.email || '',
+      role: profile.role as string,
+      profile: mapProfileRow({ ...profile, email: user.email }),
     };
   } catch {
     return null;
   }
+}
+
+export async function getAuthAdmin(token: string): Promise<AuthUser | null> {
+  const auth = await getAuthUser(token);
+  if (!auth || auth.role !== 'admin') return null;
+  return auth;
 }
 
 // ============================================================
@@ -101,25 +51,37 @@ export function generateOTP(): string {
   return Math.floor(100000 + Math.random() * 900000).toString();
 }
 
-export function storeOTP(db: ReturnType<typeof getDB>, userId: string): string {
+export async function storeOTP(userId: string): Promise<string> {
   const otp = generateOTP();
-  const expiresAt = new Date(Date.now() + 10 * 60 * 1000).toISOString(); // 10 minutes
-  db.prepare('UPDATE users SET otp_code = ?, otp_expires_at = ? WHERE id = ?').run(otp, expiresAt, userId);
+  const expiresAt = new Date(Date.now() + 10 * 60 * 1000).toISOString();
+  await supabaseAdmin
+    .from('profiles')
+    .update({ otp_code: otp, otp_expires_at: expiresAt })
+    .eq('id', userId);
   return otp;
 }
 
-export function verifyOTP(db: ReturnType<typeof getDB>, userId: string, code: string): boolean {
-  const row = db.prepare('SELECT otp_code, otp_expires_at FROM users WHERE id = ?').get(userId) as Record<string, unknown> | undefined;
-  if (!row || !row.otp_code) return false;
-  if (new Date(row.otp_expires_at as string) < new Date()) return false;
-  if (row.otp_code !== code) return false;
-  // Clear OTP and mark verified
-  db.prepare('UPDATE users SET otp_code = NULL, otp_expires_at = NULL, email_verified = 1, updated_at = datetime(\'now\') WHERE id = ?').run(userId);
+export async function verifyOTP(userId: string, code: string): Promise<boolean> {
+  const { data: profile } = await supabaseAdmin
+    .from('profiles')
+    .select('otp_code, otp_expires_at')
+    .eq('id', userId)
+    .single();
+
+  if (!profile || !profile.otp_code) return false;
+  if (new Date(profile.otp_expires_at) < new Date()) return false;
+  if (profile.otp_code !== code) return false;
+
+  await supabaseAdmin
+    .from('profiles')
+    .update({ otp_code: null, otp_expires_at: null, email_verified: true })
+    .eq('id', userId);
+
   return true;
 }
 
 // ============================================================
-// Utility functions (existing)
+// Utility functions
 // ============================================================
 
 export function generateCode(length: number = 8): string {

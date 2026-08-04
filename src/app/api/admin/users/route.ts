@@ -1,63 +1,54 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getDB, mapProfileRow, insertAuditLog } from '@/lib/db';
-import { getAuthAdmin } from '@/lib/auth';
-
-function getToken(req: NextRequest): string | null {
-  const auth = req.headers.get('authorization');
-  return auth?.startsWith('Bearer ') ? auth.slice(7) : null;
-}
+import { supabaseAdmin } from '@/lib/supabase/admin';
+import { insertAuditLog } from '@/lib/db';
+import { requireAdmin, isAuthUser } from '@/lib/req-helpers';
 
 export async function GET(req: NextRequest) {
   try {
-    const token = getToken(req);
-    const admin = getAuthAdmin(token || '');
-    if (!admin) {
-      return NextResponse.json({ error: 'Admin access required' }, { status: 403 });
-    }
+    const admin = await requireAdmin(req);
+    if (!isAuthUser(admin)) return admin;
 
     const { searchParams } = new URL(req.url);
     const search = searchParams.get('search') || '';
     const status = searchParams.get('status');
     const page = Number(searchParams.get('page')) || 1;
     const limit = Number(searchParams.get('limit')) || 20;
-    const offset = (page - 1) * limit;
 
-    const db = getDB();
-
-    // Build WHERE clause
-    const conditions: string[] = [];
-    const params: unknown[] = [];
+    let query = supabaseAdmin
+      .from('profiles')
+      .select('*', { count: 'exact' })
+      .order('created_at', { ascending: false })
+      .range((page - 1) * limit, page * limit - 1);
 
     if (search) {
-      conditions.push('(full_name LIKE ? OR username LIKE ? OR phone LIKE ?)');
-      const searchTerm = `%${search}%`;
-      params.push(searchTerm, searchTerm, searchTerm);
+      query = query.or(`full_name.ilike.%${search}%,username.ilike.%${search}%,phone.ilike.%${search}%`);
     }
 
     if (status === 'activated') {
-      conditions.push('is_activated = 1');
+      query = query.eq('is_activated', true);
     } else if (status === 'pending') {
-      conditions.push('is_activated = 0');
+      query = query.eq('is_activated', false);
     }
 
-    const whereClause = conditions.length > 0 ? 'WHERE ' + conditions.join(' AND ') : '';
+    const { data: rows, count, error } = await query;
+    if (error) throw new Error(error.message);
 
-    // Count total
-    const countRow = db.prepare(
-      `SELECT COUNT(*) as count FROM users ${whereClause}`
-    ).get(...params) as { count: number };
-    const total = countRow?.count || 0;
+    // Fetch emails for users
+    const userIds = (rows || []).map(r => r.id);
+    const { data: authUsers } = userIds.length > 0
+      ? await supabaseAdmin.auth.admin.listUsers()
+      : { users: [] };
 
-    // Fetch paginated users
-    const rows = db.prepare(
-      `SELECT * FROM users ${whereClause} ORDER BY created_at DESC LIMIT ? OFFSET ?`
-    ).all(...params, limit, offset) as Array<Record<string, unknown>>;
+    const emailMap: Record<string, string> = {};
+    for (const u of authUsers.users) {
+      emailMap[u.id] = u.email || '';
+    }
 
-    const users = rows.map((row) => ({
+    const users = (rows || []).map((row) => ({
       id: row.id,
       fullName: row.full_name,
       username: row.username,
-      email: row.email,
+      email: emailMap[row.id] || '',
       phone: row.phone,
       role: row.role,
       isActivated: Boolean(row.is_activated),
@@ -73,12 +64,7 @@ export async function GET(req: NextRequest) {
 
     return NextResponse.json({
       users,
-      pagination: {
-        page,
-        limit,
-        total,
-        totalPages: Math.ceil(total / limit),
-      },
+      pagination: { page, limit, total: count || 0, totalPages: Math.ceil((count || 0) / limit) },
     });
   } catch (error: unknown) {
     console.error('Admin users error:', error);
@@ -89,79 +75,40 @@ export async function GET(req: NextRequest) {
 
 export async function PUT(req: NextRequest) {
   try {
-    const token = getToken(req);
-    const admin = getAuthAdmin(token || '');
-    if (!admin) {
-      return NextResponse.json({ error: 'Admin access required' }, { status: 403 });
-    }
+    const admin = await requireAdmin(req);
+    if (!isAuthUser(admin)) return admin;
 
     const { userId, action } = await req.json();
     if (!userId || !action) {
       return NextResponse.json({ error: 'User ID and action are required' }, { status: 400 });
     }
 
-    const db = getDB();
+    const { data: targetUser, error: fetchError } = await supabaseAdmin
+      .from('profiles')
+      .select('*')
+      .eq('id', userId)
+      .single();
 
-    const targetUser = db.prepare('SELECT * FROM users WHERE id = ?').get(userId) as Record<string, unknown> | undefined;
-
-    if (!targetUser) {
+    if (fetchError || !targetUser) {
       return NextResponse.json({ error: 'User not found' }, { status: 404 });
     }
 
     if (action === 'activate') {
-      db.prepare(
-        "UPDATE users SET is_activated = 1, activated_at = datetime('now'), updated_at = datetime('now') WHERE id = ?"
-      ).run(userId);
+      await supabaseAdmin.from('profiles').update({
+        is_activated: true,
+        activated_at: new Date().toISOString(),
+      }).eq('id', userId);
 
-      insertAuditLog(db, admin.id, 'ADMIN_ACTIVATE_USER', `activate user ${targetUser.username}`);
-
-      const data = db.prepare('SELECT * FROM users WHERE id = ?').get(userId) as Record<string, unknown>;
-
-      return NextResponse.json({
-        user: {
-          id: data.id,
-          fullName: data.full_name,
-          username: data.username,
-          phone: data.phone,
-          role: data.role,
-          isActivated: Boolean(data.is_activated),
-          activatedAt: data.activated_at,
-          referralCode: data.referral_code,
-          createdAt: data.created_at,
-          updatedAt: data.updated_at,
-        },
-        message: 'User activated successfully',
-      });
+      await insertAuditLog(admin.id, 'ADMIN_ACTIVATE_USER', `activate user ${targetUser.username}`);
     } else if (action === 'suspend') {
-      db.prepare(
-        "UPDATE users SET is_activated = 0, updated_at = datetime('now') WHERE id = ?"
-      ).run(userId);
-
-      insertAuditLog(db, admin.id, 'ADMIN_SUSPEND_USER', `suspend user ${targetUser.username}`);
-
-      const data = db.prepare('SELECT * FROM users WHERE id = ?').get(userId) as Record<string, unknown>;
-
-      return NextResponse.json({
-        user: {
-          id: data.id,
-          fullName: data.full_name,
-          username: data.username,
-          phone: data.phone,
-          role: data.role,
-          isActivated: Boolean(data.is_activated),
-          activatedAt: data.activated_at,
-          referralCode: data.referral_code,
-          createdAt: data.created_at,
-          updatedAt: data.updated_at,
-        },
-        message: 'User suspended successfully',
-      });
+      await supabaseAdmin.from('profiles').update({ is_activated: false }).eq('id', userId);
+      await insertAuditLog(admin.id, 'ADMIN_SUSPEND_USER', `suspend user ${targetUser.username}`);
     } else if (action === 'delete') {
-      // CASCADE handles related records (wallets, withdrawals, etc.)
-      db.prepare('DELETE FROM users WHERE id = ?').run(userId);
-
-      insertAuditLog(db, admin.id, 'DELETE_USER', `Deleted user ${targetUser.username}`);
-
+      // Delete profile (cascade handles related records)
+      await supabaseAdmin.from('profiles').delete().eq('id', userId);
+      // Delete auth user
+      await supabaseAdmin.auth.admin.deleteUser(userId);
+      await insertAuditLog(admin.id, 'DELETE_USER', `Deleted user ${targetUser.username}`);
       return NextResponse.json({ message: 'User deleted successfully' });
     } else {
       return NextResponse.json(
@@ -169,6 +116,24 @@ export async function PUT(req: NextRequest) {
         { status: 400 }
       );
     }
+
+    const { data: data } = await supabaseAdmin.from('profiles').select('*').eq('id', userId).single();
+
+    return NextResponse.json({
+      user: {
+        id: data.id,
+        fullName: data.full_name,
+        username: data.username,
+        phone: data.phone,
+        role: data.role,
+        isActivated: Boolean(data.is_activated),
+        activatedAt: data.activated_at,
+        referralCode: data.referral_code,
+        createdAt: data.created_at,
+        updatedAt: data.updated_at,
+      },
+      message: `User ${action}d successfully`,
+    });
   } catch (error: unknown) {
     console.error('Admin edit user error:', error);
     const message = error instanceof Error ? error.message : 'Failed to edit user';

@@ -1,34 +1,46 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getDB, insertNotification } from '@/lib/db';
-import { getAuthUser } from '@/lib/auth';
-
-function getToken(req: NextRequest): string | null {
-  const auth = req.headers.get('authorization');
-  return auth?.startsWith('Bearer ') ? auth.slice(7) : null;
-}
+import { supabaseAdmin } from '@/lib/supabase/admin';
+import { insertNotification } from '@/lib/db';
+import { requireAuth, isAuthUser } from '@/lib/req-helpers';
 
 export async function POST(req: NextRequest) {
   try {
-    const auth = getAuthUser(getToken(req)!);
-    if (!auth) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    const auth = await requireAuth(req);
+    if (!isAuthUser(auth)) return auth;
 
     const { taskId, proof } = await req.json();
     if (!taskId) return NextResponse.json({ error: 'Task ID is required' }, { status: 400 });
     if (!auth.profile.isActivated) return NextResponse.json({ error: 'Account must be activated' }, { status: 403 });
 
-    const db = getDB();
-    const task = db.prepare('SELECT * FROM tasks WHERE id = ?').get(taskId) as Record<string, unknown> | undefined;
-    if (!task || !Boolean(task.is_active)) return NextResponse.json({ error: 'Task not found or inactive' }, { status: 404 });
-    if (Boolean(task.requires_proof) && !proof) return NextResponse.json({ error: 'Proof is required for this task' }, { status: 400 });
+    const { data: task, error: taskError } = await supabaseAdmin
+      .from('tasks')
+      .select('*')
+      .eq('id', taskId)
+      .single();
 
-    const existing = db.prepare('SELECT id FROM task_submissions WHERE user_id = ? AND task_id = ?').get(auth.id, taskId);
+    if (taskError || !task || !task.is_active) return NextResponse.json({ error: 'Task not found or inactive' }, { status: 404 });
+    if (task.requires_proof && !proof) return NextResponse.json({ error: 'Proof is required for this task' }, { status: 400 });
+
+    // Check existing submission
+    const { data: existing } = await supabaseAdmin
+      .from('task_submissions')
+      .select('id')
+      .eq('user_id', auth.id)
+      .eq('task_id', taskId)
+      .maybeSingle();
+
     if (existing) return NextResponse.json({ error: 'Already submitted this task' }, { status: 400 });
 
-    const id = crypto.randomUUID();
-    db.prepare('INSERT INTO task_submissions (id, user_id, task_id, proof) VALUES (?, ?, ?, ?)').run(id, auth.id, taskId, proof || null);
-    insertNotification(db, auth.id, 'Task Submitted', `Your submission for '${task.title}' is pending review.`, 'task');
+    const { data: submission, error: subError } = await supabaseAdmin
+      .from('task_submissions')
+      .insert({ user_id: auth.id, task_id: taskId, proof: proof || null })
+      .select()
+      .single();
 
-    const submission = db.prepare('SELECT * FROM task_submissions WHERE id = ?').get(id);
+    if (subError) throw new Error(subError.message);
+
+    await insertNotification(auth.id, 'Task Submitted', `Your submission for '${task.title}' is pending review.`, 'task');
+
     return NextResponse.json({ submission, message: 'Task submitted successfully' }, { status: 201 });
   } catch (error: unknown) {
     console.error('Submit task error:', error);

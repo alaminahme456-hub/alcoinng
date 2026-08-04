@@ -1,17 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getDB, insertAuditLog, insertNotification } from '@/lib/db';
-import { getAuthUser } from '@/lib/auth';
-
-function getToken(req: NextRequest): string | null {
-  const auth = req.headers.get('authorization');
-  return auth?.startsWith('Bearer ') ? auth.slice(7) : null;
-}
+import { supabaseAdmin } from '@/lib/supabase/admin';
+import { insertAuditLog, insertNotification, ensureWallets } from '@/lib/db';
+import { requireAuth, isAuthUser } from '@/lib/req-helpers';
 
 export async function POST(req: NextRequest) {
   try {
-    const token = getToken(req);
-    const auth = getAuthUser(token!);
-    if (!auth) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    const auth = await requireAuth(req);
+    if (!isAuthUser(auth)) return auth;
 
     const { adId } = await req.json();
     if (!adId) {
@@ -22,35 +17,50 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Account must be activated' }, { status: 403 });
     }
 
-    const db = getDB();
+    const { data: ad, error: adError } = await supabaseAdmin
+      .from('ads')
+      .select('*')
+      .eq('id', adId)
+      .single();
 
-    const ad = db.prepare('SELECT * FROM ads WHERE id = ?').get(adId) as Record<string, unknown> | undefined;
-    if (!ad || !ad.is_active) {
+    if (adError || !ad || !ad.is_active) {
       return NextResponse.json({ error: 'Ad not found or inactive' }, { status: 404 });
     }
 
-    const existingView = db.prepare('SELECT id FROM ad_views WHERE user_id = ? AND ad_id = ?').get(auth.id, adId);
+    // Check existing view
+    const { data: existingView } = await supabaseAdmin
+      .from('ad_views')
+      .select('id')
+      .eq('user_id', auth.id)
+      .eq('ad_id', adId)
+      .maybeSingle();
+
     if (existingView) {
       return NextResponse.json({ error: 'Ad already watched' }, { status: 400 });
     }
 
-    db.transaction(() => {
-      // Create ad view
-      db.prepare('INSERT INTO ad_views (id, user_id, ad_id, completed) VALUES (?, ?, ?, 1)').run(crypto.randomUUID(), auth.id, adId);
+    // Create ad view
+    await supabaseAdmin.from('ad_views').insert({
+      user_id: auth.id,
+      ad_id: adId,
+      completed: true,
+    });
 
-      // Credit reward wallet
-      const wallet = db.prepare('SELECT * FROM wallets WHERE user_id = ? AND type = ?').get(auth.id, 'reward') as Record<string, unknown> | undefined;
-      if (!wallet) throw new Error('Reward wallet not found');
+    // Credit reward wallet
+    const { data: wallet } = await supabaseAdmin
+      .from('wallets')
+      .select('*')
+      .eq('user_id', auth.id)
+      .eq('type', 'reward')
+      .single();
 
-      const newBalance = Number(wallet.balance) + Number(ad.reward);
-      db.prepare('UPDATE wallets SET balance = ? WHERE id = ?').run(newBalance, wallet.id);
+    if (!wallet) throw new Error('Reward wallet not found');
 
-      insertNotification(db, auth.id, 'Ad Reward', `You earned \u20a6${Number(ad.reward).toLocaleString()} for watching an ad.`, 'reward');
-      insertAuditLog(db, auth.id, 'WATCH_AD', `Watched ad '${ad.title}', earned \u20a6${Number(ad.reward).toLocaleString()}`);
-    })();
+    const newBalance = Number(wallet.balance) + Number(ad.reward);
+    await supabaseAdmin.from('wallets').update({ balance: newBalance }).eq('id', wallet.id);
 
-    const wallet = db.prepare('SELECT * FROM wallets WHERE user_id = ? AND type = ?').get(auth.id, 'reward') as Record<string, unknown>;
-    const newBalance = Number(wallet.balance);
+    await insertNotification(auth.id, 'Ad Reward', `You earned \u20a6${Number(ad.reward).toLocaleString()} for watching an ad.`, 'reward');
+    await insertAuditLog(auth.id, 'WATCH_AD', `Watched ad '${ad.title}', earned \u20a6${Number(ad.reward).toLocaleString()}`);
 
     return NextResponse.json({
       message: 'Ad watched successfully',

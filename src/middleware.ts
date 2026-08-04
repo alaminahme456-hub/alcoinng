@@ -5,6 +5,7 @@ export function middleware(request: NextRequest) {
   if (request.nextUrl.pathname.startsWith('/api/auth/')) {
     return NextResponse.next({ request })
   }
+  // All other API routes pass through — auth is checked per-route
   return NextResponse.next({ request })
 }
 

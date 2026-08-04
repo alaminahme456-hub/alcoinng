@@ -1,10 +1,15 @@
 import { NextResponse } from 'next/server';
-import { getDB } from '@/lib/db';
+import { supabaseAdmin } from '@/lib/supabase/admin';
 
 export async function GET() {
   try {
-    const db = getDB();
-    const rows = db.prepare('SELECT * FROM tasks WHERE is_active = 1 ORDER BY created_at DESC').all();
+    const { data: rows, error } = await supabaseAdmin
+      .from('tasks')
+      .select('*')
+      .eq('is_active', true)
+      .order('created_at', { ascending: false });
+
+    if (error) throw new Error(error.message);
     return NextResponse.json({ tasks: rows || [] });
   } catch (error: unknown) {
     console.error('Fetch tasks error:', error);

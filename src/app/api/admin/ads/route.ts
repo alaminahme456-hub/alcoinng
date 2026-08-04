@@ -1,40 +1,31 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getDB, touchUpdated, intBool, insertAuditLog } from '@/lib/db';
-import { getAuthAdmin } from '@/lib/auth';
-
-function getToken(req: NextRequest): string | null {
-  const auth = req.headers.get('authorization');
-  return auth?.startsWith('Bearer ') ? auth.slice(7) : null;
-}
+import { supabaseAdmin } from '@/lib/supabase/admin';
+import { insertAuditLog } from '@/lib/db';
+import { requireAdmin, isAuthUser } from '@/lib/req-helpers';
 
 export async function GET(req: NextRequest) {
   try {
-    const token = getToken(req);
-    const admin = getAuthAdmin(token || '');
-    if (!admin) {
-      return NextResponse.json({ error: 'Admin access required' }, { status: 403 });
-    }
+    const admin = await requireAdmin(req);
+    if (!isAuthUser(admin)) return admin;
 
     const { searchParams } = new URL(req.url);
     const page = Number(searchParams.get('page')) || 1;
     const limit = Number(searchParams.get('limit')) || 20;
-    const offset = (page - 1) * limit;
 
-    const db = getDB();
+    const { data: rows, count, error } = await supabaseAdmin
+      .from('ads')
+      .select('*', { count: 'exact' })
+      .order('created_at', { ascending: false })
+      .range((page - 1) * limit, page * limit - 1);
 
-    // Count total
-    const countRow = db.prepare('SELECT COUNT(*) as count FROM ads').get() as { count: number };
-    const total = countRow?.count || 0;
+    if (error) throw new Error(error.message);
 
-    // Fetch paginated ads
-    const rows = db.prepare(
-      'SELECT * FROM ads ORDER BY created_at DESC LIMIT ? OFFSET ?'
-    ).all(limit, offset) as Array<Record<string, unknown>>;
+    const ads = await Promise.all((rows || []).map(async (row) => {
+      const { count: viewCount } = await supabaseAdmin
+        .from('ad_views')
+        .select('*', { count: 'exact', head: true })
+        .eq('ad_id', row.id);
 
-    const viewCountStmt = db.prepare('SELECT COUNT(*) as cnt FROM ad_views WHERE ad_id = ?');
-
-    const ads = rows.map((row) => {
-      const viewRow = viewCountStmt.get(row.id) as { cnt: number } | undefined;
       return {
         id: row.id,
         title: row.title,
@@ -44,15 +35,13 @@ export async function GET(req: NextRequest) {
         isActive: Boolean(row.is_active),
         createdAt: row.created_at,
         updatedAt: row.updated_at,
-        _count: {
-          views: viewRow?.cnt || 0,
-        },
+        _count: { views: viewCount || 0 },
       };
-    });
+    }));
 
     return NextResponse.json({
       ads,
-      pagination: { page, limit, total, totalPages: Math.ceil(total / limit) },
+      pagination: { page, limit, total: count || 0, totalPages: Math.ceil((count || 0) / limit) },
     });
   } catch (error: unknown) {
     console.error('Admin ads error:', error);
@@ -63,46 +52,38 @@ export async function GET(req: NextRequest) {
 
 export async function PUT(req: NextRequest) {
   try {
-    const token = getToken(req);
-    const admin = getAuthAdmin(token || '');
-    if (!admin) {
-      return NextResponse.json({ error: 'Admin access required' }, { status: 403 });
-    }
+    const admin = await requireAdmin(req);
+    if (!isAuthUser(admin)) return admin;
 
     const { adId, title, thumbnail, duration, reward, isActive } = await req.json();
     if (!adId) {
       return NextResponse.json({ error: 'Ad ID is required' }, { status: 400 });
     }
 
-    const db = getDB();
+    const { data: existing } = await supabaseAdmin
+      .from('ads')
+      .select('id')
+      .eq('id', adId)
+      .maybeSingle();
 
-    const existing = db.prepare('SELECT id FROM ads WHERE id = ?').get(adId);
     if (!existing) {
       return NextResponse.json({ error: 'Ad not found' }, { status: 404 });
     }
 
-    // Build SET clause dynamically for partial update
-    const setParts: string[] = [];
-    const params: unknown[] = [];
+    const updates: Record<string, unknown> = {};
+    if (title !== undefined) updates.title = title;
+    if (thumbnail !== undefined) updates.thumbnail = thumbnail;
+    if (duration !== undefined) updates.duration = Number(duration);
+    if (reward !== undefined) updates.reward = Number(reward);
+    if (isActive !== undefined) updates.is_active = Boolean(isActive);
 
-    if (title !== undefined) { setParts.push('title = ?'); params.push(title); }
-    if (thumbnail !== undefined) { setParts.push('thumbnail = ?'); params.push(thumbnail); }
-    if (duration !== undefined) { setParts.push('duration = ?'); params.push(Number(duration)); }
-    if (reward !== undefined) { setParts.push('reward = ?'); params.push(Number(reward)); }
-    if (isActive !== undefined) { setParts.push('is_active = ?'); params.push(intBool(Boolean(isActive))); }
-
-    if (setParts.length === 0) {
+    if (Object.keys(updates).length === 0) {
       return NextResponse.json({ error: 'No fields to update' }, { status: 400 });
     }
 
-    setParts.push("updated_at = datetime('now')");
-    params.push(adId);
+    await supabaseAdmin.from('ads').update(updates).eq('id', adId);
 
-    db.prepare(
-      `UPDATE ads SET ${setParts.join(', ')} WHERE id = ?`
-    ).run(...params);
-
-    const data = db.prepare('SELECT * FROM ads WHERE id = ?').get(adId) as Record<string, unknown>;
+    const { data } = await supabaseAdmin.from('ads').select('*').eq('id', adId).single();
 
     const ad = {
       id: data.id,
@@ -125,11 +106,8 @@ export async function PUT(req: NextRequest) {
 
 export async function DELETE(req: NextRequest) {
   try {
-    const token = getToken(req);
-    const admin = getAuthAdmin(token || '');
-    if (!admin) {
-      return NextResponse.json({ error: 'Admin access required' }, { status: 403 });
-    }
+    const admin = await requireAdmin(req);
+    if (!isAuthUser(admin)) return admin;
 
     const { searchParams } = new URL(req.url);
     const adId = searchParams.get('adId');
@@ -137,13 +115,10 @@ export async function DELETE(req: NextRequest) {
       return NextResponse.json({ error: 'Ad ID is required' }, { status: 400 });
     }
 
-    const db = getDB();
+    await supabaseAdmin.from('ad_views').delete().eq('ad_id', adId);
+    await supabaseAdmin.from('ads').delete().eq('id', adId);
 
-    // Delete ad views first, then the ad
-    db.prepare('DELETE FROM ad_views WHERE ad_id = ?').run(adId);
-    db.prepare('DELETE FROM ads WHERE id = ?').run(adId);
-
-    insertAuditLog(db, admin.id, 'DELETE_AD', `Deleted ad ${adId}`);
+    await insertAuditLog(admin.id, 'DELETE_AD', `Deleted ad ${adId}`);
 
     return NextResponse.json({ message: 'Ad deleted successfully' });
   } catch (error: unknown) {

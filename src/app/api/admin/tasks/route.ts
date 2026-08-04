@@ -1,57 +1,41 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getDB, insertAuditLog, insertNotification, touchUpdated, intBool } from '@/lib/db';
-import { getAuthAdmin } from '@/lib/auth';
-
-function getToken(req: NextRequest): string | null {
-  const auth = req.headers.get('authorization');
-  return auth?.startsWith('Bearer ') ? auth.slice(7) : null;
-}
+import { supabaseAdmin } from '@/lib/supabase/admin';
+import { insertAuditLog, insertNotification } from '@/lib/db';
+import { requireAdmin, isAuthUser } from '@/lib/req-helpers';
 
 export async function GET(req: NextRequest) {
   try {
-    const token = getToken(req);
-    const admin = getAuthAdmin(token || '');
-    if (!admin) {
-      return NextResponse.json({ error: 'Admin access required' }, { status: 403 });
-    }
+    const admin = await requireAdmin(req);
+    if (!isAuthUser(admin)) return admin;
 
     const { searchParams } = new URL(req.url);
     const page = Number(searchParams.get('page')) || 1;
     const limit = Number(searchParams.get('limit')) || 20;
-    const offset = (page - 1) * limit;
-
-    const db = getDB();
-
-    // Count total tasks
-    const countRow = db.prepare('SELECT COUNT(*) as count FROM tasks').get() as { count: number };
-    const total = countRow?.count || 0;
 
     // Fetch paginated tasks
-    const tasks = db
-      .prepare(`SELECT * FROM tasks ORDER BY created_at DESC LIMIT ? OFFSET ?`)
-      .all(limit, offset) as Array<Record<string, unknown>>;
+    const { data: tasks, count: totalCount, error } = await supabaseAdmin
+      .from('tasks')
+      .select('*', { count: 'exact' })
+      .order('created_at', { ascending: false })
+      .range((page - 1) * limit, page * limit - 1);
 
-    // Prepare statement for fetching submissions per task
-    const submissionsStmt = db.prepare(
-      `SELECT ts.*, u.full_name, u.username
-       FROM task_submissions ts
-       JOIN users u ON ts.user_id = u.id
-       WHERE ts.task_id = ?`
-    );
+    if (error) throw new Error(error.message);
 
-    const countSubsStmt = db.prepare(
-      'SELECT COUNT(*) as count FROM task_submissions WHERE task_id = ?'
-    );
+    // Fetch submissions for each task
+    const mappedTasks = await Promise.all((tasks || []).map(async (row) => {
+      const { data: allSubmissions } = await supabaseAdmin
+        .from('task_submissions')
+        .select(`*, profiles!task_submissions_user_id_fkey(full_name, username)`)
+        .eq('task_id', row.id);
 
-    const mappedTasks = tasks.map((row) => {
-      const allSubmissions = submissionsStmt.all(row.id) as Array<Record<string, unknown>>;
+      const { count: totalSubCount } = await supabaseAdmin
+        .from('task_submissions')
+        .select('*', { count: 'exact', head: true })
+        .eq('task_id', row.id);
 
-      // Filter to pending submissions, take first 5
-      const pendingSubs = allSubmissions
+      const pendingSubs = (allSubmissions || [])
         .filter((s) => s.status === 'pending')
         .slice(0, 5);
-
-      const totalSubCount = (countSubsStmt.get(row.id) as { count: number })?.count || 0;
 
       return {
         id: row.id,
@@ -62,23 +46,21 @@ export async function GET(req: NextRequest) {
         isActive: Boolean(row.is_active),
         createdAt: row.created_at,
         updatedAt: row.updated_at,
-        _count: {
-          submissions: totalSubCount,
-        },
-        submissions: pendingSubs.map((s) => ({
+        _count: { submissions: totalSubCount || 0 },
+        submissions: pendingSubs.map((s: any) => ({
           id: s.id,
           userId: s.user_id,
-          userName: s.full_name || s.username || 'Unknown',
+          userName: s.profiles?.full_name || s.profiles?.username || 'Unknown',
           proof: s.proof,
           status: s.status,
           submittedAt: s.created_at,
         })),
       };
-    });
+    }));
 
     return NextResponse.json({
       tasks: mappedTasks,
-      pagination: { page, limit, total, totalPages: Math.ceil(total / limit) },
+      pagination: { page, limit, total: totalCount || 0, totalPages: Math.ceil((totalCount || 0) / limit) },
     });
   } catch (error: unknown) {
     console.error('Admin tasks error:', error);
@@ -89,53 +71,28 @@ export async function GET(req: NextRequest) {
 
 export async function PUT(req: NextRequest) {
   try {
-    const token = getToken(req);
-    const admin = getAuthAdmin(token || '');
-    if (!admin) {
-      return NextResponse.json({ error: 'Admin access required' }, { status: 403 });
-    }
+    const admin = await requireAdmin(req);
+    if (!isAuthUser(admin)) return admin;
 
     const { taskId, title, instructions, reward, requiresProof, isActive } = await req.json();
     if (!taskId) {
       return NextResponse.json({ error: 'Task ID is required' }, { status: 400 });
     }
 
-    const db = getDB();
+    const updates: Record<string, unknown> = {};
+    if (title !== undefined) updates.title = title;
+    if (instructions !== undefined) updates.instructions = instructions;
+    if (reward !== undefined) updates.reward = Number(reward);
+    if (requiresProof !== undefined) updates.requires_proof = Boolean(requiresProof);
+    if (isActive !== undefined) updates.is_active = Boolean(isActive);
 
-    // Build SET clause dynamically
-    const setParts: string[] = [];
-    const params: unknown[] = [];
-
-    if (title !== undefined) {
-      setParts.push('title = ?');
-      params.push(title);
-    }
-    if (instructions !== undefined) {
-      setParts.push('instructions = ?');
-      params.push(instructions);
-    }
-    if (reward !== undefined) {
-      setParts.push('reward = ?');
-      params.push(Number(reward));
-    }
-    if (requiresProof !== undefined) {
-      setParts.push('requires_proof = ?');
-      params.push(intBool(Boolean(requiresProof)));
-    }
-    if (isActive !== undefined) {
-      setParts.push('is_active = ?');
-      params.push(intBool(Boolean(isActive)));
-    }
-
-    if (setParts.length === 0) {
+    if (Object.keys(updates).length === 0) {
       return NextResponse.json({ error: 'No fields to update' }, { status: 400 });
     }
 
-    params.push(taskId);
-    db.prepare(`UPDATE tasks SET ${setParts.join(', ')} WHERE id = ?`).run(...params);
-    touchUpdated(db, 'tasks', taskId);
+    await supabaseAdmin.from('tasks').update(updates).eq('id', taskId);
 
-    const data = db.prepare('SELECT * FROM tasks WHERE id = ?').get(taskId) as Record<string, unknown>;
+    const { data: data } = await supabaseAdmin.from('tasks').select('*').eq('id', taskId).single();
 
     const task = {
       id: data.id,
@@ -158,11 +115,8 @@ export async function PUT(req: NextRequest) {
 
 export async function DELETE(req: NextRequest) {
   try {
-    const token = getToken(req);
-    const admin = getAuthAdmin(token || '');
-    if (!admin) {
-      return NextResponse.json({ error: 'Admin access required' }, { status: 403 });
-    }
+    const admin = await requireAdmin(req);
+    if (!isAuthUser(admin)) return admin;
 
     const { searchParams } = new URL(req.url);
     const taskId = searchParams.get('taskId');
@@ -170,11 +124,8 @@ export async function DELETE(req: NextRequest) {
       return NextResponse.json({ error: 'Task ID is required' }, { status: 400 });
     }
 
-    const db = getDB();
-
-    // Delete submissions first, then the task
-    db.prepare('DELETE FROM task_submissions WHERE task_id = ?').run(taskId);
-    db.prepare('DELETE FROM tasks WHERE id = ?').run(taskId);
+    await supabaseAdmin.from('task_submissions').delete().eq('task_id', taskId);
+    await supabaseAdmin.from('tasks').delete().eq('id', taskId);
 
     return NextResponse.json({ message: 'Task deleted successfully' });
   } catch (error: unknown) {
@@ -186,35 +137,25 @@ export async function DELETE(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   try {
-    const token = getToken(req);
-    const admin = getAuthAdmin(token || '');
-    if (!admin) {
-      return NextResponse.json({ error: 'Admin access required' }, { status: 403 });
-    }
+    const admin = await requireAdmin(req);
+    if (!isAuthUser(admin)) return admin;
 
     const { submissionId, action } = await req.json();
     if (!submissionId || !action) {
       return NextResponse.json({ error: 'Submission ID and action are required' }, { status: 400 });
     }
-
     if (!['approve', 'reject'].includes(action)) {
       return NextResponse.json({ error: 'Action must be approve or reject' }, { status: 400 });
     }
 
-    const db = getDB();
+    // Fetch submission with task info
+    const { data: submission, error: subError } = await supabaseAdmin
+      .from('task_submissions')
+      .select(`*, tasks!task_submissions_task_id_fkey(title, reward), profiles!task_submissions_user_id_fkey(username)`)
+      .eq('id', submissionId)
+      .single();
 
-    // Fetch submission with task and user info
-    const submission = db
-      .prepare(
-        `SELECT ts.*, t.title as task_title, t.reward as task_reward, u.username
-         FROM task_submissions ts
-         JOIN tasks t ON ts.task_id = t.id
-         JOIN users u ON ts.user_id = u.id
-         WHERE ts.id = ?`
-      )
-      .get(submissionId) as Record<string, unknown> | undefined;
-
-    if (!submission) {
+    if (subError || !submission) {
       return NextResponse.json({ error: 'Submission not found' }, { status: 404 });
     }
 
@@ -223,45 +164,41 @@ export async function POST(req: NextRequest) {
     }
 
     const newStatus = action === 'approve' ? 'approved' : 'rejected';
-    const taskTitle = submission.task_title as string;
-    const taskReward = Number(submission.task_reward);
+    const taskTitle = submission.tasks.title;
+    const taskReward = Number(submission.tasks.reward);
 
-    db.prepare("UPDATE task_submissions SET status = ?, updated_at = datetime('now') WHERE id = ?").run(
-      newStatus,
-      submissionId
-    );
+    await supabaseAdmin.from('task_submissions').update({ status: newStatus }).eq('id', submissionId);
 
     if (action === 'approve') {
-      // Credit reward wallet
-      const wallet = db
-        .prepare('SELECT id, balance FROM wallets WHERE user_id = ? AND type = ?')
-        .get(submission.user_id, 'reward') as Record<string, unknown> | undefined;
+      const { data: wallet } = await supabaseAdmin
+        .from('wallets')
+        .select('*')
+        .eq('user_id', submission.user_id)
+        .eq('type', 'reward')
+        .single();
 
       if (wallet) {
-        const newBalance = Number(wallet.balance) + taskReward;
-        db.prepare('UPDATE wallets SET balance = ? WHERE id = ?').run(newBalance, wallet.id);
+        await supabaseAdmin.from('wallets').update({
+          balance: Number(wallet.balance) + taskReward,
+        }).eq('id', wallet.id);
       }
 
-      insertNotification(
-        db,
-        submission.user_id as string,
-        'Task Approved! 🎉',
+      await insertNotification(
+        submission.user_id,
+        'Task Approved!',
         `Your submission for '${taskTitle}' was approved. ₦${taskReward.toLocaleString()} has been credited.`,
         'task'
       );
     } else {
-      insertNotification(
-        db,
-        submission.user_id as string,
+      await insertNotification(
+        submission.user_id,
         'Task Rejected',
         `Your submission for '${taskTitle}' was rejected.`,
         'task'
       );
     }
 
-    // Audit log
-    insertAuditLog(
-      db,
+    await insertAuditLog(
       admin.id,
       `TASK_${action.toUpperCase()}`,
       `${action}d task submission ${submissionId} for task '${taskTitle}'`

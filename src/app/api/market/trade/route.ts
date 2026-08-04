@@ -1,13 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getDB, ensureWallets, insertAuditLog, insertNotification } from '@/lib/db';
-import { getAuthUser } from '@/lib/auth';
+import { supabaseAdmin } from '@/lib/supabase/admin';
+import { insertAuditLog, insertNotification } from '@/lib/db';
+import { requireAuth, isAuthUser } from '@/lib/req-helpers';
 
 export const maxDuration = 60;
-
-function getToken(req: NextRequest): string | null {
-  const auth = req.headers.get('authorization');
-  return auth?.startsWith('Bearer ') ? auth.slice(7) : null;
-}
 
 function generateStartPrice(): number {
   return Math.floor(Math.random() * 10000) / 100 + 1;
@@ -29,8 +25,8 @@ function generateEndPrice(prediction: string): number {
 
 export async function POST(req: NextRequest) {
   try {
-    const auth = getAuthUser(getToken(req)!);
-    if (!auth) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    const auth = await requireAuth(req);
+    if (!isAuthUser(auth)) return auth;
 
     const { fundingWallet, prediction, amount, payoutMultiplier, duration } = await req.json();
     if (!fundingWallet || !prediction || !amount || !payoutMultiplier || !duration) {
@@ -47,19 +43,34 @@ export async function POST(req: NextRequest) {
     }
     if (!auth.profile.isActivated) return NextResponse.json({ error: 'Account must be activated' }, { status: 403 });
 
-    const db = getDB();
-    const wallet = db.prepare('SELECT * FROM wallets WHERE user_id = ? AND type = ?').get(auth.id, fundingWallet) as Record<string, unknown> | undefined;
+    // Check wallet balance
+    const { data: wallet } = await supabaseAdmin
+      .from('wallets')
+      .select('*')
+      .eq('user_id', auth.id)
+      .eq('type', fundingWallet)
+      .single();
+
     if (!wallet || Number(wallet.balance) < numAmount) {
       return NextResponse.json({ error: 'Insufficient balance' }, { status: 400 });
     }
 
     // Debit wallet
     const newBalance = Number(wallet.balance) - numAmount;
-    db.prepare('UPDATE wallets SET balance = ?, updated_at = datetime(\'now\') WHERE id = ?').run(newBalance, wallet.id);
+    await supabaseAdmin.from('wallets').update({ balance: newBalance }).eq('id', wallet.id);
 
     const startPrice = generateStartPrice();
-    const tradeId = crypto.randomUUID();
-    db.prepare('INSERT INTO trades (id, user_id, funding_wallet, prediction, amount, payout_multiplier, duration, start_price) VALUES (?, ?, ?, ?, ?, ?, ?, ?)').run(tradeId, auth.id, fundingWallet, prediction, numAmount, numMultiplier, numDuration, startPrice);
+    const { data: trade } = await supabaseAdmin.from('trades').insert({
+      user_id: auth.id,
+      funding_wallet: fundingWallet,
+      prediction,
+      amount: numAmount,
+      payout_multiplier: numMultiplier,
+      duration: numDuration,
+      start_price: startPrice,
+    }).select().single();
+
+    if (!trade) throw new Error('Failed to create trade');
 
     // Wait for trade duration
     await new Promise<void>((resolve) => setTimeout(resolve, numDuration * 1000));
@@ -71,28 +82,33 @@ export async function POST(req: NextRequest) {
     const result = isWin ? 'win' : 'loss';
     const profit = isWin ? numAmount * (numMultiplier - 1) : 0;
 
-    db.prepare('UPDATE trades SET end_price = ?, result = ?, profit = ? WHERE id = ?').run(endPrice, result, profit, tradeId);
+    await supabaseAdmin.from('trades').update({
+      end_price: endPrice,
+      result,
+      profit,
+    }).eq('id', trade.id);
 
     if (isWin) {
       if (fundingWallet === 'reward') {
-        const rw = db.prepare('SELECT * FROM wallets WHERE user_id = ? AND type = ?').get(auth.id, 'reward') as Record<string, unknown> | undefined;
-        if (rw) db.prepare('UPDATE wallets SET balance = ?, updated_at = datetime(\'now\') WHERE id = ?').run(Number(rw.balance) + numAmount, rw.id);
+        const { data: rw } = await supabaseAdmin.from('wallets').select('*').eq('user_id', auth.id).eq('type', 'reward').single();
+        if (rw) await supabaseAdmin.from('wallets').update({ balance: Number(rw.balance) + numAmount }).eq('id', rw.id);
 
-        const pw = db.prepare('SELECT * FROM wallets WHERE user_id = ? AND type = ?').get(auth.id, 'profit') as Record<string, unknown> | undefined;
-        if (pw) db.prepare('UPDATE wallets SET balance = ?, updated_at = datetime(\'now\') WHERE id = ?').run(Number(pw.balance) + profit, pw.id);
+        const { data: pw } = await supabaseAdmin.from('wallets').select('*').eq('user_id', auth.id).eq('type', 'profit').single();
+        if (pw) await supabaseAdmin.from('wallets').update({ balance: Number(pw.balance) + profit }).eq('id', pw.id);
       } else {
-        const fw = db.prepare('SELECT * FROM wallets WHERE user_id = ? AND type = ?').get(auth.id, fundingWallet) as Record<string, unknown> | undefined;
-        if (fw) db.prepare('UPDATE wallets SET balance = ?, updated_at = datetime(\'now\') WHERE id = ?').run(Number(fw.balance) + numAmount + profit, fw.id);
+        const { data: fw } = await supabaseAdmin.from('wallets').select('*').eq('user_id', auth.id).eq('type', fundingWallet).single();
+        if (fw) await supabaseAdmin.from('wallets').update({ balance: Number(fw.balance) + numAmount + profit }).eq('id', fw.id);
       }
-      insertNotification(db, auth.id, 'Trade Won!', `Your ${prediction.toUpperCase()} trade won! Profit: \u20a6${profit.toLocaleString()}`, 'trade');
+      await insertNotification(auth.id, 'Trade Won!', `Your ${prediction.toUpperCase()} trade won! Profit: \u20a6${profit.toLocaleString()}`, 'trade');
     } else {
-      insertNotification(db, auth.id, 'Trade Lost', `Your ${prediction.toUpperCase()} trade lost. \u20a6${numAmount.toLocaleString()} was deducted.`, 'trade');
+      await insertNotification(auth.id, 'Trade Lost', `Your ${prediction.toUpperCase()} trade lost. \u20a6${numAmount.toLocaleString()} was deducted.`, 'trade');
     }
 
-    insertAuditLog(db, auth.id, 'TRADE', `${result.toUpperCase()}: ${prediction.toUpperCase()} \u20a6${numAmount.toLocaleString()} (start: ${startPrice}, end: ${endPrice})`);
+    await insertAuditLog(auth.id, 'TRADE', `${result.toUpperCase()}: ${prediction.toUpperCase()} \u20a6${numAmount.toLocaleString()} (start: ${startPrice}, end: ${endPrice})`);
 
-    const updatedTrade = db.prepare('SELECT * FROM trades WHERE id = ?').get(tradeId);
-    const wallets = db.prepare('SELECT * FROM wallets WHERE user_id = ?').all(auth.id);
+    // Fetch updated trade and wallets
+    const { data: updatedTrade } = await supabaseAdmin.from('trades').select('*').eq('id', trade.id).single();
+    const { data: wallets } = await supabaseAdmin.from('wallets').select('*').eq('user_id', auth.id);
 
     return NextResponse.json({ trade: updatedTrade, wallets, message: isWin ? 'Trade won!' : 'Trade lost' });
   } catch (error: unknown) {

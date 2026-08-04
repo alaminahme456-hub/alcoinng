@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getDB, mapProfileRow, insertAuditLog } from '@/lib/db';
-import { comparePassword, signToken } from '@/lib/auth';
+import { supabaseAdmin } from '@/lib/supabase/admin';
+import { mapProfileRow, insertAuditLog } from '@/lib/db';
 
 export async function POST(req: NextRequest) {
   try {
@@ -10,32 +10,61 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Login ID and password are required' }, { status: 400 });
     }
 
-    const db = getDB();
-
-    // Look up user by email or username
-    const row = db.prepare('SELECT * FROM users WHERE email = ? OR username = ?').get(loginId, loginId) as Record<string, unknown> | undefined;
-
-    if (!row) {
-      return NextResponse.json({ error: 'Invalid credentials' }, { status: 401 });
-    }
-
-    // Compare password
-    const valid = await comparePassword(password, row.password_hash as string);
-    if (!valid) {
-      return NextResponse.json({ error: 'Invalid credentials' }, { status: 401 });
-    }
-
-    // Sign JWT
-    const token = await signToken({
-      userId: row.id as string,
-      role: row.role as string,
-      email: row.email as string,
+    // Find user by email or username
+    // First try by email via auth
+    const { data: authUsers, error: listError } = await supabaseAdmin.auth.admin.listUsers({
+      filters: loginId.includes('@') ? { email: loginId.toLowerCase() } : undefined,
+      perPage: 1000,
     });
 
-    // Audit log
-    insertAuditLog(db, row.id as string, 'user.login', 'Logged in');
+    let targetUser = authUsers?.users.find(u => u.email === loginId.toLowerCase());
 
-    return NextResponse.json({ user: mapProfileRow(row), token });
+    // If not found by email, try by username via profiles
+    if (!targetUser) {
+      const { data: profile } = await supabaseAdmin
+        .from('profiles')
+        .select('id')
+        .eq('username', loginId)
+        .single();
+
+      if (profile) {
+        const { data: userById } = await supabaseAdmin.auth.admin.getUserById(profile.id);
+        targetUser = userById?.user;
+      }
+    }
+
+    if (!targetUser) {
+      return NextResponse.json({ error: 'Invalid credentials' }, { status: 401 });
+    }
+
+    // Verify password by signing in with the admin client
+    const { data: signInData, error: signInError } = await supabaseAdmin.auth.signInWithPassword({
+      email: targetUser.email!,
+      password,
+    });
+
+    if (signInError || !signInData.session) {
+      return NextResponse.json({ error: 'Invalid credentials' }, { status: 401 });
+    }
+
+    // Fetch profile
+    const { data: profileRow } = await supabaseAdmin
+      .from('profiles')
+      .select('*')
+      .eq('id', targetUser.id)
+      .single();
+
+    if (!profileRow) {
+      return NextResponse.json({ error: 'Profile not found' }, { status: 404 });
+    }
+
+    // Audit log
+    await insertAuditLog(targetUser.id, 'user.login', 'Logged in');
+
+    return NextResponse.json({
+      user: mapProfileRow({ ...profileRow, email: targetUser.email }),
+      token: signInData.session.access_token,
+    });
   } catch (error: unknown) {
     console.error('Login error:', error);
     const message = error instanceof Error ? error.message : 'Login failed';
