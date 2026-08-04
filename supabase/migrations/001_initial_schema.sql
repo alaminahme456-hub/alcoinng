@@ -3,6 +3,7 @@
 -- ============================================================
 
 -- PROFILES table (extends Supabase Auth users)
+-- Note: activation_code_id added after activation_codes table to avoid circular FK
 CREATE TABLE IF NOT EXISTS public.profiles (
   id              UUID PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
   full_name       TEXT NOT NULL DEFAULT '',
@@ -11,7 +12,6 @@ CREATE TABLE IF NOT EXISTS public.profiles (
   role            TEXT NOT NULL DEFAULT 'user' CHECK (role IN ('user', 'admin')),
   is_activated    BOOLEAN NOT NULL DEFAULT false,
   activated_at    TIMESTAMPTZ,
-  activation_code_id UUID REFERENCES public.activation_codes(id) ON DELETE SET NULL,
   referred_by     UUID REFERENCES public.profiles(id) ON DELETE SET NULL,
   referral_code   TEXT UNIQUE NOT NULL,
   profile_picture TEXT,
@@ -162,6 +162,20 @@ CREATE TABLE IF NOT EXISTS public.audit_logs (
 );
 
 -- ============================================================
+-- Add activation_code_id to profiles AFTER activation_codes exists
+-- (avoids circular foreign key dependency)
+-- ============================================================
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_schema = 'public' AND table_name = 'profiles' AND column_name = 'activation_code_id'
+  ) THEN
+    ALTER TABLE public.profiles ADD COLUMN activation_code_id UUID REFERENCES public.activation_codes(id) ON DELETE SET NULL;
+  END IF;
+END $$;
+
+-- ============================================================
 -- INDEXES
 -- ============================================================
 CREATE INDEX IF NOT EXISTS idx_profiles_username ON public.profiles(username);
@@ -215,6 +229,7 @@ CREATE POLICY "Public read announcements" ON public.announcements FOR SELECT USI
 -- Authenticated users can manage their own data
 CREATE POLICY "Users read own profile" ON public.profiles FOR SELECT USING (auth.uid() = id);
 CREATE POLICY "Users update own profile" ON public.profiles FOR UPDATE USING (auth.uid() = id);
+CREATE POLICY "Allow profile insert" ON public.profiles FOR INSERT WITH CHECK (auth.uid() = id);
 CREATE POLICY "Users read own wallets" ON public.wallets FOR SELECT USING (auth.uid() = user_id);
 CREATE POLICY "Users read own notifications" ON public.notifications FOR SELECT USING (auth.uid() = user_id);
 CREATE POLICY "Users update own notifications" ON public.notifications FOR UPDATE USING (auth.uid() = user_id);
@@ -228,9 +243,6 @@ CREATE POLICY "Users insert own ad_views" ON public.ad_views FOR INSERT WITH CHE
 CREATE POLICY "Users read own task_submissions" ON public.task_submissions FOR SELECT USING (auth.uid() = user_id);
 CREATE POLICY "Users insert own task_submissions" ON public.task_submissions FOR INSERT WITH CHECK (auth.uid() = user_id);
 CREATE POLICY "Users read own audit_logs" ON public.audit_logs FOR SELECT USING (auth.uid() = user_id);
-
--- Profiles insert on signup (handled via trigger)
-CREATE POLICY "Allow profile insert" ON public.profiles FOR INSERT WITH CHECK (auth.uid() = id);
 
 -- ============================================================
 -- FUNCTION: Auto-update updated_at
