@@ -57,20 +57,21 @@ export async function POST(req: NextRequest) {
         .single();
     }
 
-    // Create user via admin API (bypasses email confirmation)
-    const { data: userData, error: createError } = await supabaseAdmin.auth.admin.createUser({
+    // Sign up via anon client (respects Supabase email confirmation setting)
+    const { data: signUpData, error: signUpError } = await supabaseAnon.auth.signUp({
       email,
       password,
-      email_confirm: true,
-      user_metadata: {
-        full_name: fullName,
-        username,
-        phone,
+      options: {
+        data: {
+          full_name: fullName,
+          username,
+          phone,
+        },
       },
     });
 
-    if (createError || !userData.user) {
-      const msg = createError?.message || 'Failed to create account';
+    if (signUpError || !signUpData.user) {
+      const msg = signUpError?.message || 'Failed to create account';
       if (msg.includes('already registered') || msg.includes('already been registered')) {
         return NextResponse.json({ error: 'Email already registered' }, { status: 409 });
       }
@@ -89,7 +90,7 @@ export async function POST(req: NextRequest) {
     const { error: updateError } = await supabaseAdmin
       .from('profiles')
       .update(updateData)
-      .eq('id', userData.user.id);
+      .eq('id', signUpData.user.id);
 
     if (updateError) {
       console.error('Profile update error after signup:', updateError);
@@ -99,44 +100,14 @@ export async function POST(req: NextRequest) {
     const { data: profile } = await supabaseAdmin
       .from('profiles')
       .select('*')
-      .eq('id', userData.user.id)
+      .eq('id', signUpData.user.id)
       .single();
-
-    // Generate a session token by signing in with anon client
-    const { data: sessionData, error: sessionError } = await supabaseAnon.auth.signInWithPassword({
-      email,
-      password,
-    });
-
-    const token = sessionData?.session?.access_token || null;
-
-    if (sessionError) {
-      console.error('Session generation error:', sessionError);
-      // Return user without token — frontend can redirect to login
-      const user = {
-        id: profile.id,
-        fullName: profile.full_name,
-        username: profile.username,
-        email: userData.user.email!,
-        phone: profile.phone,
-        role: profile.role,
-        isActivated: profile.is_activated,
-        activatedAt: profile.activated_at,
-        referralCode: profile.referral_code,
-        profilePicture: profile.profile_picture,
-        bankName: profile.bank_name,
-        bankAccount: profile.bank_account,
-        bankAccountName: profile.bank_account_name,
-        createdAt: profile.created_at,
-      };
-      return NextResponse.json({ user, token: null }, { status: 201 });
-    }
 
     const user = {
       id: profile.id,
       fullName: profile.full_name,
       username: profile.username,
-      email: userData.user.email!,
+      email: signUpData.user.email!,
       phone: profile.phone,
       role: profile.role,
       isActivated: profile.is_activated,
@@ -148,6 +119,9 @@ export async function POST(req: NextRequest) {
       bankAccountName: profile.bank_account_name,
       createdAt: profile.created_at,
     };
+
+    // signUp returns a session + token directly when email confirmation is off
+    const token = signUpData.session?.access_token || null;
 
     return NextResponse.json({ user, token }, { status: 201 });
   } catch (error: unknown) {
