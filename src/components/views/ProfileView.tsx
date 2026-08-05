@@ -7,10 +7,12 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { ArrowLeft, User, Building2, Lock, Save, Eye, EyeOff, CheckCircle2, ShieldCheck, LogOut } from 'lucide-react';
+import { ArrowLeft, User, Building2, Lock, Save, CheckCircle2, ShieldCheck, LogOut, Info } from 'lucide-react';
+import { useAuth } from '@clerk/nextjs';
 
 export default function ProfileView() {
-  const { user, setUser, setView, logout } = useAppStore();
+  const { user, setUser, setView } = useAppStore();
+  const { signOut } = useAuth();
   const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
   const [activeTab, setActiveTab] = useState('profile');
 
@@ -30,15 +32,7 @@ export default function ProfileView() {
   const [bankSuccess, setBankSuccess] = useState(false);
   const [bankError, setBankError] = useState('');
 
-  // Password fields
-  const [oldPassword, setOldPassword] = useState('');
-  const [newPassword, setNewPassword] = useState('');
-  const [confirmPassword, setConfirmPassword] = useState('');
-  const [showOldPw, setShowOldPw] = useState(false);
-  const [showNewPw, setShowNewPw] = useState(false);
-  const [pwLoading, setPwLoading] = useState(false);
-  const [pwSuccess, setPwSuccess] = useState(false);
-  const [pwError, setPwError] = useState('');
+
 
   const handleSaveProfile = async () => {
     setProfileLoading(true);
@@ -78,28 +72,11 @@ export default function ProfileView() {
     }
   };
 
-  const handleChangePassword = async () => {
-    if (newPassword !== confirmPassword) {
-      setPwError('Passwords do not match');
-      return;
-    }
-    setPwLoading(true);
-    setPwError('');
-    setPwSuccess(false);
+  const handleLogout = async () => {
     try {
-      await apiFetch('/api/user/password', {
-        method: 'PUT',
-        body: JSON.stringify({ oldPassword, newPassword }),
-      });
-      setPwSuccess(true);
-      setOldPassword('');
-      setNewPassword('');
-      setConfirmPassword('');
-      setTimeout(() => setPwSuccess(false), 3000);
-    } catch (err: any) {
-      setPwError(err.message || 'Failed to change password');
-    } finally {
-      setPwLoading(false);
+      await signOut({ redirectUrl: '/' });
+    } catch {
+      window.location.href = '/';
     }
   };
 
@@ -158,8 +135,8 @@ export default function ProfileView() {
               <TabsTrigger value="bank" className="text-xs gap-1.5 data-[state=active]:gradient-gold data-[state=active]:text-gold-foreground">
                 <Building2 className="w-3.5 h-3.5" /> Bank
               </TabsTrigger>
-              <TabsTrigger value="password" className="text-xs gap-1.5 data-[state=active]:gradient-gold data-[state=active]:text-gold-foreground">
-                <Lock className="w-3.5 h-3.5" /> Password
+              <TabsTrigger value="security" className="text-xs gap-1.5 data-[state=active]:gradient-gold data-[state=active]:text-gold-foreground">
+                <Lock className="w-3.5 h-3.5" /> Security
               </TabsTrigger>
             </TabsList>
 
@@ -291,84 +268,20 @@ export default function ProfileView() {
             </TabsContent>
 
             {/* Password Tab */}
-            <TabsContent value="password" className="mt-4 space-y-4">
+            <TabsContent value="security" className="mt-4 space-y-4">
               <div className="glass rounded-2xl p-6 space-y-4">
-                <div className="space-y-2">
-                  <Label htmlFor="oldPw" className="text-sm text-muted-foreground">Current Password</Label>
-                  <div className="relative">
-                    <Input
-                      id="oldPw"
-                      type={showOldPw ? 'text' : 'password'}
-                      placeholder="Enter current password"
-                      value={oldPassword}
-                      onChange={(e) => setOldPassword(e.target.value)}
-                      className="bg-white/5 border-white/10 focus:border-gold h-12 pr-10"
-                    />
-                    <button
-                      type="button"
-                      onClick={() => setShowOldPw(!showOldPw)}
-                      className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
-                    >
-                      {showOldPw ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                    </button>
+                <div className="flex items-center gap-3 mb-2">
+                  <div className="w-10 h-10 rounded-xl bg-alcoin-blue/10 flex items-center justify-center">
+                    <Info className="w-5 h-5 text-alcoin-blue" />
+                  </div>
+                  <div>
+                    <h3 className="font-semibold text-sm">Password & Security</h3>
+                    <p className="text-xs text-muted-foreground">Managed by our secure auth provider</p>
                   </div>
                 </div>
-                <div className="space-y-2">
-                  <Label htmlFor="newPw" className="text-sm text-muted-foreground">New Password</Label>
-                  <div className="relative">
-                    <Input
-                      id="newPw"
-                      type={showNewPw ? 'text' : 'password'}
-                      placeholder="Enter new password"
-                      value={newPassword}
-                      onChange={(e) => setNewPassword(e.target.value)}
-                      className="bg-white/5 border-white/10 focus:border-gold h-12 pr-10"
-                    />
-                    <button
-                      type="button"
-                      onClick={() => setShowNewPw(!showNewPw)}
-                      className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
-                    >
-                      {showNewPw ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                    </button>
-                  </div>
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="confirmNewPw" className="text-sm text-muted-foreground">Confirm New Password</Label>
-                  <div className="relative">
-                    <Input
-                      id="confirmNewPw"
-                      type={showNewPw ? 'text' : 'password'}
-                      placeholder="Confirm new password"
-                      value={confirmPassword}
-                      onChange={(e) => setConfirmPassword(e.target.value)}
-                      className="bg-white/5 border-white/10 focus:border-gold h-12"
-                    />
-                  </div>
-                </div>
-
-                {pwSuccess && (
-                  <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} className="flex items-center gap-2 text-sm text-emerald-400">
-                    <CheckCircle2 className="w-4 h-4" /> Password changed successfully
-                  </motion.div>
-                )}
-                {pwError && (
-                  <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} className="p-3 rounded-lg bg-destructive/10 border border-destructive/20 text-destructive text-sm">
-                    {pwError}
-                  </motion.div>
-                )}
-
-                <Button
-                  onClick={handleChangePassword}
-                  disabled={pwLoading || !oldPassword || !newPassword || !confirmPassword}
-                  className="w-full gradient-gold text-gold-foreground font-semibold h-12"
-                >
-                  {pwLoading ? (
-                    <motion.div animate={{ rotate: 360 }} transition={{ repeat: Infinity, duration: 1, ease: 'linear' }} className="w-5 h-5 border-2 border-gold-foreground/30 border-t-gold-foreground rounded-full" />
-                  ) : (
-                    <span className="flex items-center gap-2"><Lock className="w-4 h-4" /> Change Password</span>
-                  )}
-                </Button>
+                <p className="text-sm text-muted-foreground">
+                  Your account password and security settings are managed securely through our authentication provider. You can change your password directly from the sign-in page by clicking &quot;Forgot password&quot;.
+                </p>
               </div>
             </TabsContent>
           </Tabs>
@@ -419,7 +332,7 @@ export default function ProfileView() {
                   Cancel
                 </Button>
                 <Button
-                  onClick={logout}
+                  onClick={handleLogout}
                   className="flex-1 h-11 bg-destructive hover:bg-destructive/90 text-white font-semibold rounded-xl"
                 >
                   Log Out
