@@ -151,7 +151,7 @@ export default function WithdrawView() {
             </div>
           </div>
 
-          {/* Bank Details Display */
+          {/* Bank Details Display */}
           {user?.bankName && user?.bankAccount && user?.bankAccountName ? (
             <div className="rounded-2xl p-4 glass border-alcoin-blue/20 space-y-3">
               <div className="flex items-center gap-2">
