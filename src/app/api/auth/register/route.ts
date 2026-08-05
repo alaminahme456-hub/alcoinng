@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { supabaseAdmin } from '@/lib/supabase/admin';
+import { supabaseAdmin, createSignInClient } from '@/lib/supabase/admin';
 import { mapProfileRow, ensureWallets, insertAuditLog } from '@/lib/db';
 import { generateReferralCode } from '@/lib/auth';
 
@@ -93,8 +93,9 @@ export async function POST(req: NextRequest) {
     // Audit log
     await insertAuditLog(userId, 'user.registered', `Registered as @${username}`);
 
-    // Auto sign-in to get a token
-    const { data: signInData, error: signInError } = await supabaseAdmin.auth.signInWithPassword({
+    // Auto sign-in using a fresh client (avoids session pollution)
+    const signInClient = createSignInClient();
+    const { data: signInData, error: signInError } = await signInClient.auth.signInWithPassword({
       email: email.toLowerCase(),
       password,
     });

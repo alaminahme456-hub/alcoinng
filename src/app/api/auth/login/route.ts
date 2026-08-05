@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { supabaseAdmin } from '@/lib/supabase/admin';
+import { supabaseAdmin, createSignInClient } from '@/lib/supabase/admin';
 import { mapProfileRow, insertAuditLog } from '@/lib/db';
 
 export async function POST(req: NextRequest) {
@@ -14,14 +14,12 @@ export async function POST(req: NextRequest) {
     let targetUser;
 
     if (loginId.includes('@')) {
-      // Search by email via auth.users
       const { data: authUsers } = await supabaseAdmin.auth.admin.listUsers({
         filters: { email: loginId.toLowerCase() },
         perPage: 1,
       });
       targetUser = authUsers?.users[0];
     } else {
-      // Search by username via profiles, then get auth user
       const { data: profile } = await supabaseAdmin
         .from('profiles')
         .select('id')
@@ -38,15 +36,16 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Invalid credentials' }, { status: 401 });
     }
 
-    // Auto-confirm email if not confirmed (handles users stuck from previous email_confirm: false)
+    // Auto-confirm email if not confirmed
     if (!targetUser.email_confirmed_at) {
       await supabaseAdmin.auth.admin.updateUserById(targetUser.id, {
         email_confirm: true,
       });
     }
 
-    // Verify password by signing in
-    const { data: signInData, error: signInError } = await supabaseAdmin.auth.signInWithPassword({
+    // Verify password using a fresh client (avoids session pollution)
+    const signInClient = createSignInClient();
+    const { data: signInData, error: signInError } = await signInClient.auth.signInWithPassword({
       email: targetUser.email!,
       password,
     });

@@ -70,6 +70,8 @@ export default function AuthView() {
       setUser(data.user);
       if (data.user.role === 'admin') {
         setView('admin-dashboard');
+      } else if (!data.user.isActivated) {
+        setView('activate');
       } else {
         setView('dashboard');
       }
