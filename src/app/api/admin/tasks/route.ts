@@ -9,6 +9,26 @@ export async function GET(req: NextRequest) {
     if (!isAuthUser(admin)) return admin;
 
     const { searchParams } = new URL(req.url);
+    const submissionsFor = searchParams.get('submissionsFor');
+    if (submissionsFor) {
+      const { data, error } = await supabaseAdmin
+        .from('task_submissions')
+        .select(`*, profiles!task_submissions_user_id_fkey(full_name, username)`)
+        .eq('task_id', submissionsFor)
+        .order('created_at', { ascending: false });
+      if (error) throw new Error(error.message);
+      const submissions = (data || []).map((s: any) => ({
+        id: s.id,
+        userId: s.user_id,
+        userName: s.profiles?.full_name || s.profiles?.username || 'Unknown',
+        proof: s.proof,
+        proofUrl: s.proof,
+        status: s.status,
+        submittedAt: s.created_at,
+      }));
+      return NextResponse.json({ submissions });
+    }
+
     const page = Number(searchParams.get('page')) || 1;
     const limit = Number(searchParams.get('limit')) || 20;
 
@@ -44,6 +64,7 @@ export async function GET(req: NextRequest) {
         reward: Number(row.reward),
         requiresProof: Boolean(row.requires_proof),
         isActive: Boolean(row.is_active),
+        active: Boolean(row.is_active),
         createdAt: row.created_at,
         updatedAt: row.updated_at,
         _count: { submissions: totalSubCount || 0 },
@@ -140,7 +161,20 @@ export async function POST(req: NextRequest) {
     const admin = await requireAdmin(req);
     if (!isAuthUser(admin)) return admin;
 
-    const { submissionId, action } = await req.json();
+    const body = await req.json();
+    const { submissionId, action, title, instructions, reward, requiresProof = true, isActive = true } = body;
+
+    if (!submissionId && title) {
+      const { data, error } = await supabaseAdmin
+        .from('tasks')
+        .insert({ title, instructions, reward: Number(reward), requires_proof: Boolean(requiresProof), is_active: Boolean(isActive) })
+        .select('*')
+        .single();
+      if (error) throw new Error(error.message);
+      await insertAuditLog(admin.id, 'CREATE_TASK', `Created task: ${title}`);
+      return NextResponse.json({ task: data, message: 'Task created successfully' }, { status: 201 });
+    }
+
     if (!submissionId || !action) {
       return NextResponse.json({ error: 'Submission ID and action are required' }, { status: 400 });
     }

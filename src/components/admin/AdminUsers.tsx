@@ -88,13 +88,13 @@ export default function AdminUsers() {
     setActionLoading(true);
     try {
       if (type === 'activate') {
-        await apiFetch(`/api/admin/users/${user.id}/activate`, { method: 'POST' });
+        await apiFetch('/api/admin/users', { method: 'PUT', body: JSON.stringify({ userId: user.id, action: 'activate' }) });
         toast.success(`${user.fullName} activated`);
       } else if (type === 'suspend') {
-        await apiFetch(`/api/admin/users/${user.id}/suspend`, { method: 'POST' });
+        await apiFetch('/api/admin/users', { method: 'PUT', body: JSON.stringify({ userId: user.id, action: 'suspend' }) });
         toast.success(`${user.fullName} suspended`);
       } else if (type === 'delete') {
-        await apiFetch(`/api/admin/users/${user.id}`, { method: 'DELETE' });
+        await apiFetch('/api/admin/users', { method: 'PUT', body: JSON.stringify({ userId: user.id, action: 'delete' }) });
         toast.success(`${user.fullName} deleted`);
       }
       fetchUsers();

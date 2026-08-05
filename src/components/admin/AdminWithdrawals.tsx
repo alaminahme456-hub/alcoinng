@@ -73,7 +73,7 @@ export default function AdminWithdrawals() {
     const { type, withdrawal } = confirmAction;
     setActionLoading(true);
     try {
-      await apiFetch(`/api/admin/withdrawals/${withdrawal.id}/${type}`, { method: 'POST' });
+      await apiFetch('/api/admin/withdrawals', { method: 'PUT', body: JSON.stringify({ withdrawalId: withdrawal.id, action: type === 'paid' ? 'pay' : type }) });
       toast.success(`Withdrawal ${type === 'paid' ? 'marked as paid' : `${type}d`}`);
       fetchWithdrawals();
     } catch (e: unknown) {

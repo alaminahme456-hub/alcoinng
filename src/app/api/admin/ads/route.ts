@@ -30,9 +30,11 @@ export async function GET(req: NextRequest) {
         id: row.id,
         title: row.title,
         thumbnail: row.thumbnail,
+        thumbnailUrl: row.thumbnail,
         duration: Number(row.duration),
         reward: Number(row.reward),
         isActive: Boolean(row.is_active),
+        active: Boolean(row.is_active),
         createdAt: row.created_at,
         updatedAt: row.updated_at,
         _count: { views: viewCount || 0 },
@@ -50,12 +52,61 @@ export async function GET(req: NextRequest) {
   }
 }
 
+export async function POST(req: NextRequest) {
+  try {
+    const admin = await requireAdmin(req);
+    if (!isAuthUser(admin)) return admin;
+
+    const { title, thumbnail, thumbnailUrl, duration, reward, isActive = true } = await req.json();
+    const image = thumbnailUrl ?? thumbnail;
+    if (!title || !image || !duration || reward === undefined) {
+      return NextResponse.json({ error: 'Title, thumbnail, duration, and reward are required' }, { status: 400 });
+    }
+
+    const { data, error } = await supabaseAdmin
+      .from('ads')
+      .insert({
+        title,
+        thumbnail: image,
+        duration: Number(duration),
+        reward: Number(reward),
+        is_active: Boolean(isActive),
+      })
+      .select('*')
+      .single();
+
+    if (error) throw new Error(error.message);
+
+    await insertAuditLog(admin.id, 'CREATE_AD', `Created ad: ${title}`);
+
+    return NextResponse.json({
+      ad: {
+        id: data.id,
+        title: data.title,
+        thumbnail: data.thumbnail,
+        thumbnailUrl: data.thumbnail,
+        duration: Number(data.duration),
+        reward: Number(data.reward),
+        isActive: Boolean(data.is_active),
+        active: Boolean(data.is_active),
+        createdAt: data.created_at,
+        updatedAt: data.updated_at,
+      },
+      message: 'Ad created successfully',
+    }, { status: 201 });
+  } catch (error: unknown) {
+    console.error('Admin create ad error:', error);
+    const message = error instanceof Error ? error.message : 'Failed to create ad';
+    return NextResponse.json({ error: message }, { status: 500 });
+  }
+}
+
 export async function PUT(req: NextRequest) {
   try {
     const admin = await requireAdmin(req);
     if (!isAuthUser(admin)) return admin;
 
-    const { adId, title, thumbnail, duration, reward, isActive } = await req.json();
+    const { adId, title, thumbnail, thumbnailUrl, duration, reward, isActive } = await req.json();
     if (!adId) {
       return NextResponse.json({ error: 'Ad ID is required' }, { status: 400 });
     }
@@ -73,6 +124,7 @@ export async function PUT(req: NextRequest) {
     const updates: Record<string, unknown> = {};
     if (title !== undefined) updates.title = title;
     if (thumbnail !== undefined) updates.thumbnail = thumbnail;
+    if (thumbnailUrl !== undefined) updates.thumbnail = thumbnailUrl;
     if (duration !== undefined) updates.duration = Number(duration);
     if (reward !== undefined) updates.reward = Number(reward);
     if (isActive !== undefined) updates.is_active = Boolean(isActive);
@@ -89,9 +141,11 @@ export async function PUT(req: NextRequest) {
       id: data.id,
       title: data.title,
       thumbnail: data.thumbnail,
+      thumbnailUrl: data.thumbnail,
       duration: Number(data.duration),
       reward: Number(data.reward),
       isActive: Boolean(data.is_active),
+      active: Boolean(data.is_active),
       createdAt: data.created_at,
       updatedAt: data.updated_at,
     };

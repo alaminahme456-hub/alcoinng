@@ -71,7 +71,7 @@ export default function AdminDepositCodes() {
     }
     setGenLoading(true);
     try {
-      await apiFetch('/api/admin/deposit-codes/generate', {
+      await apiFetch('/api/admin/deposit-codes', {
         method: 'POST',
         body: JSON.stringify({ amount, count }),
       });
@@ -91,7 +91,7 @@ export default function AdminDepositCodes() {
     if (!disableTarget) return;
     setDisableLoading(true);
     try {
-      await apiFetch(`/api/admin/deposit-codes/${disableTarget.id}/disable`, { method: 'POST' });
+      await apiFetch('/api/admin/deposit-codes', { method: 'PUT', body: JSON.stringify({ codeId: disableTarget.id, action: 'disable' }) });
       toast.success('Code disabled');
       fetchCodes();
     } catch (e: unknown) {
