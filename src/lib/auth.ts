@@ -1,5 +1,46 @@
+import { SignJWT, jwtVerify } from 'jose';
+import bcrypt from 'bcryptjs';
 import { supabaseAdmin } from './supabase/admin';
 import { mapProfileRow } from './db';
+
+// ============================================================
+// JWT Configuration
+// ============================================================
+
+const JWT_SECRET = new TextEncoder().encode(
+  process.env.JWT_SECRET || 'alcoin-default-secret-change-in-production'
+);
+
+const TOKEN_EXPIRY = '7d';
+
+export async function hashPassword(password: string): Promise<string> {
+  return bcrypt.hash(password, 12);
+}
+
+export async function verifyPassword(password: string, hash: string): Promise<boolean> {
+  return bcrypt.compare(password, hash);
+}
+
+export async function signToken(payload: { id: string; email: string; role: string }): Promise<string> {
+  return new SignJWT(payload)
+    .setProtectedHeader({ alg: 'HS256' })
+    .setIssuedAt()
+    .setExpirationTime(TOKEN_EXPIRY)
+    .sign(JWT_SECRET);
+}
+
+export async function verifyToken(token: string): Promise<{ id: string; email: string; role: string } | null> {
+  try {
+    const { payload } = await jwtVerify(token, JWT_SECRET);
+    return {
+      id: payload.id as string,
+      email: payload.email as string,
+      role: payload.role as string,
+    };
+  } catch {
+    return null;
+  }
+}
 
 // ============================================================
 // Auth helpers for API routes
@@ -14,23 +55,22 @@ export interface AuthUser {
 
 export async function getAuthUser(token: string): Promise<AuthUser | null> {
   try {
-    // Verify the JWT with Supabase
-    const { data: { user }, error } = await supabaseAdmin.auth.getUser(token);
-    if (error || !user) return null;
+    const payload = await verifyToken(token);
+    if (!payload) return null;
 
     const { data: profile } = await supabaseAdmin
       .from('profiles')
       .select('*')
-      .eq('id', user.id)
+      .eq('id', payload.id)
       .single();
 
     if (!profile) return null;
 
     return {
-      id: user.id,
-      email: user.email || '',
+      id: payload.id,
+      email: profile.email || payload.email,
       role: profile.role as string,
-      profile: mapProfileRow({ ...profile, email: user.email }),
+      profile: mapProfileRow(profile),
     };
   } catch {
     return null;
@@ -44,7 +84,7 @@ export async function getAuthAdmin(token: string): Promise<AuthUser | null> {
 }
 
 // ============================================================
-// OTP helpers
+// OTP helpers (data-only, no Supabase Auth)
 // ============================================================
 
 export function generateOTP(): string {

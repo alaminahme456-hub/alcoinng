@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { supabaseAdmin, createSignInClient } from '@/lib/supabase/admin';
+import { supabaseAdmin } from '@/lib/supabase/admin';
 import { mapProfileRow, ensureWallets, insertAuditLog } from '@/lib/db';
-import { generateReferralCode } from '@/lib/auth';
+import { generateReferralCode, hashPassword, signToken } from '@/lib/auth';
 
 export async function POST(req: NextRequest) {
   try {
@@ -9,6 +9,22 @@ export async function POST(req: NextRequest) {
 
     if (!fullName || !username || !email || !phone || !password) {
       return NextResponse.json({ error: 'All fields are required' }, { status: 400 });
+    }
+
+    if (password.length < 6) {
+      return NextResponse.json({ error: 'Password must be at least 6 characters' }, { status: 400 });
+    }
+
+    const emailLower = email.toLowerCase();
+
+    // Check email uniqueness in profiles table
+    const { data: existingEmail } = await supabaseAdmin
+      .from('profiles')
+      .select('id')
+      .eq('email', emailLower)
+      .single();
+    if (existingEmail) {
+      return NextResponse.json({ error: 'Email already registered' }, { status: 409 });
     }
 
     // Check username uniqueness
@@ -19,15 +35,6 @@ export async function POST(req: NextRequest) {
       .single();
     if (existingUsername) {
       return NextResponse.json({ error: 'Username already taken' }, { status: 409 });
-    }
-
-    // Check email uniqueness via auth.users
-    const { data: existingUsers } = await supabaseAdmin.auth.admin.listUsers({
-      filters: { email: email.toLowerCase() },
-      perPage: 1,
-    });
-    if (existingUsers && existingUsers.users.length > 0) {
-      return NextResponse.json({ error: 'Email already registered' }, { status: 409 });
     }
 
     // Validate referral code if provided
@@ -57,35 +64,30 @@ export async function POST(req: NextRequest) {
       if (codeExists) finalReferralCode = generateReferralCode();
     }
 
-    // Create user in Supabase Auth
-    const { data: authData, error: authError } = await supabaseAdmin.auth.admin.createUser({
-      email: email.toLowerCase(),
-      password,
-      email_confirm: true,
-      user_metadata: { full_name: fullName, username, phone },
-    });
+    // Hash the password
+    const passwordHash = await hashPassword(password);
 
-    if (authError || !authData.user) {
-      return NextResponse.json({ error: authError?.message || 'Failed to create account' }, { status: 500 });
+    // Create profile with email and password_hash directly
+    const { data: newProfile, error: profileError } = await supabaseAdmin
+      .from('profiles')
+      .insert({
+        full_name: fullName,
+        username,
+        email: emailLower,
+        phone,
+        password_hash: passwordHash,
+        referral_code: finalReferralCode,
+        referred_by: referrerId || null,
+        email_verified: true,
+      })
+      .select('*')
+      .single();
+
+    if (profileError || !newProfile) {
+      return NextResponse.json({ error: profileError?.message || 'Failed to create account' }, { status: 500 });
     }
 
-    const userId = authData.user.id;
-
-    // Create profile
-    const { error: profileError } = await supabaseAdmin.from('profiles').insert({
-      id: userId,
-      full_name: fullName,
-      username,
-      phone,
-      referral_code: finalReferralCode,
-      referred_by: referrerId || null,
-      email_verified: true,
-    });
-
-    if (profileError) {
-      await supabaseAdmin.auth.admin.deleteUser(userId);
-      return NextResponse.json({ error: profileError.message }, { status: 500 });
-    }
+    const userId = newProfile.id;
 
     // Create wallets
     await ensureWallets(userId);
@@ -93,37 +95,16 @@ export async function POST(req: NextRequest) {
     // Audit log
     await insertAuditLog(userId, 'user.registered', `Registered as @${username}`);
 
-    // Auto sign-in using a fresh client (avoids session pollution)
-    const signInClient = createSignInClient();
-    const { data: signInData, error: signInError } = await signInClient.auth.signInWithPassword({
-      email: email.toLowerCase(),
-      password,
+    // Sign custom JWT
+    const token = await signToken({
+      id: userId,
+      email: emailLower,
+      role: newProfile.role as string,
     });
 
-    if (signInError || !signInData.session) {
-      // Account created but auto-login failed — user can still login manually
-      const { data: profileRow } = await supabaseAdmin
-        .from('profiles')
-        .select('*')
-        .eq('id', userId)
-        .single();
-
-      return NextResponse.json({
-        user: mapProfileRow({ ...profileRow, email }),
-        token: null,
-      }, { status: 201 });
-    }
-
-    // Fetch the created profile for response
-    const { data: profileRow } = await supabaseAdmin
-      .from('profiles')
-      .select('*')
-      .eq('id', userId)
-      .single();
-
     return NextResponse.json({
-      user: mapProfileRow({ ...profileRow, email }),
-      token: signInData.session.access_token,
+      user: mapProfileRow(newProfile),
+      token,
     }, { status: 201 });
   } catch (error: unknown) {
     console.error('Register error:', error);

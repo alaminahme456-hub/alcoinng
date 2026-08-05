@@ -1,74 +1,60 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabase/admin';
 import { mapProfileRow, insertAuditLog } from '@/lib/db';
-import { verifyOTP, storeOTP } from '@/lib/auth';
+import { verifyOTP, storeOTP, verifyPassword, signToken } from '@/lib/auth';
 
 export async function POST(req: NextRequest) {
   try {
     const { email, otp, password } = await req.json();
 
-    if (!email || !otp) {
-      return NextResponse.json({ error: 'Email and OTP are required' }, { status: 400 });
+    if (!email || !otp || !password) {
+      return NextResponse.json({ error: 'Email, OTP, and password are required' }, { status: 400 });
     }
 
-    // Find user by email
-    const { data: authUsers } = await supabaseAdmin.auth.admin.listUsers({
-      filters: { email: email.toLowerCase() },
-      perPage: 1,
-    });
-    const user = authUsers?.users[0];
-    if (!user) {
+    // Find user by email in profiles table
+    const { data: profile } = await supabaseAdmin
+      .from('profiles')
+      .select('*')
+      .eq('email', email.toLowerCase())
+      .single();
+
+    if (!profile) {
       return NextResponse.json({ error: 'User not found' }, { status: 404 });
     }
 
+    // Verify password
+    if (!profile.password_hash) {
+      return NextResponse.json({ error: 'Invalid credentials' }, { status: 401 });
+    }
+    const valid = await verifyPassword(password, profile.password_hash);
+    if (!valid) {
+      return NextResponse.json({ error: 'Invalid credentials' }, { status: 401 });
+    }
+
     // Verify OTP
-    const verified = await verifyOTP(user.id, otp);
+    const verified = await verifyOTP(profile.id, otp);
     if (!verified) {
       return NextResponse.json({ error: 'Invalid or expired OTP. Please check and try again.' }, { status: 401 });
     }
 
-    // Sign in to get a token
-    let token: string;
-    if (password) {
-      const { data: signInData, error: signInError } = await supabaseAdmin.auth.signInWithPassword({
-        email: email.toLowerCase(),
-        password,
-      });
-      if (signInError || !signInData.session) {
-        return NextResponse.json({ error: 'Invalid credentials' }, { status: 401 });
-      }
-      token = signInData.session.access_token;
-    } else {
-      // Generate an admin token for the user
-      const { data, error } = await supabaseAdmin.auth.admin.generateLink({
-        type: 'magiclink',
-        email: email.toLowerCase(),
-      });
-      if (error || !data) {
-        // Fallback: sign in if password was stored
-        return NextResponse.json({ error: 'Please provide your password to complete verification' }, { status: 400 });
-      }
-      // Extract the token from the generated link
-      const hashedToken = data.hashed_token;
-      // For magic link, we need to verify the OTP that was sent
-      // Instead, let's just create a session directly
-      const { data: sessionData } = await supabaseAdmin.auth.admin.getUserById(user.id);
-      // Use the user's existing session
-      token = ''; // We'll need the password for proper auth
-      return NextResponse.json({ error: 'Please provide your password to complete verification' }, { status: 400 });
-    }
+    // Sign custom JWT
+    const token = await signToken({
+      id: profile.id,
+      email: profile.email,
+      role: profile.role,
+    });
 
     // Audit log
-    await insertAuditLog(user.id, 'user.email_verified', 'Email verified via OTP');
+    await insertAuditLog(profile.id, 'user.email_verified', 'Email verified via OTP');
 
     // Fetch updated profile
-    const { data: profileRow } = await supabaseAdmin
+    const { data: updatedProfile } = await supabaseAdmin
       .from('profiles')
       .select('*')
-      .eq('id', user.id)
+      .eq('id', profile.id)
       .single();
 
-    return NextResponse.json({ user: mapProfileRow({ ...profileRow, email: user.email }), token });
+    return NextResponse.json({ user: mapProfileRow(updatedProfile!), token });
   } catch (error: unknown) {
     console.error('Verify OTP error:', error);
     const message = error instanceof Error ? error.message : 'OTP verification failed';
@@ -79,27 +65,28 @@ export async function POST(req: NextRequest) {
 // Resend OTP endpoint
 export async function PUT(req: NextRequest) {
   try {
-    const { email, password } = await req.json();
+    const { email } = await req.json();
 
     if (!email) {
       return NextResponse.json({ error: 'Email is required' }, { status: 400 });
     }
 
-    // Find user by email
-    const { data: authUsers } = await supabaseAdmin.auth.admin.listUsers({
-      filters: { email: email.toLowerCase() },
-      perPage: 1,
-    });
-    const user = authUsers?.users[0];
-    if (!user) {
+    // Find user by email in profiles table
+    const { data: profile } = await supabaseAdmin
+      .from('profiles')
+      .select('id')
+      .eq('email', email.toLowerCase())
+      .single();
+
+    if (!profile) {
       return NextResponse.json({ error: 'User not found' }, { status: 404 });
     }
 
     // Generate and store new OTP
-    const otpCode = await storeOTP(user.id);
+    const otpCode = await storeOTP(profile.id);
 
     // Audit log
-    await insertAuditLog(user.id, 'user.otp_resent', 'OTP code resent');
+    await insertAuditLog(profile.id, 'user.otp_resent', 'OTP code resent');
 
     return NextResponse.json({ message: 'OTP resent successfully', otp: otpCode });
   } catch (error: unknown) {

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabase/admin';
-import { insertAuditLog } from '@/lib/db';
+import { mapProfileRow, insertAuditLog } from '@/lib/db';
 import { requireAdmin, isAuthUser } from '@/lib/req-helpers';
 
 export async function GET(req: NextRequest) {
@@ -21,7 +21,7 @@ export async function GET(req: NextRequest) {
       .range((page - 1) * limit, page * limit - 1);
 
     if (search) {
-      query = query.or(`full_name.ilike.%${search}%,username.ilike.%${search}%,phone.ilike.%${search}%`);
+      query = query.or(`full_name.ilike.%${search}%,username.ilike.%${search}%,email.ilike.%${search}%,phone.ilike.%${search}%`);
     }
 
     if (status === 'activated') {
@@ -33,22 +33,12 @@ export async function GET(req: NextRequest) {
     const { data: rows, count, error } = await query;
     if (error) throw new Error(error.message);
 
-    // Fetch emails for users
-    const userIds = (rows || []).map(r => r.id);
-    const { data: authUsers } = userIds.length > 0
-      ? await supabaseAdmin.auth.admin.listUsers()
-      : { users: [] };
-
-    const emailMap: Record<string, string> = {};
-    for (const u of authUsers.users) {
-      emailMap[u.id] = u.email || '';
-    }
-
+    // Email is now stored directly in profiles
     const users = (rows || []).map((row) => ({
       id: row.id,
       fullName: row.full_name,
       username: row.username,
-      email: emailMap[row.id] || '',
+      email: row.email || '',
       phone: row.phone,
       role: row.role,
       isActivated: Boolean(row.is_activated),
@@ -106,8 +96,6 @@ export async function PUT(req: NextRequest) {
     } else if (action === 'delete') {
       // Delete profile (cascade handles related records)
       await supabaseAdmin.from('profiles').delete().eq('id', userId);
-      // Delete auth user
-      await supabaseAdmin.auth.admin.deleteUser(userId);
       await insertAuditLog(admin.id, 'DELETE_USER', `Deleted user ${targetUser.username}`);
       return NextResponse.json({ message: 'User deleted successfully' });
     } else {
@@ -117,13 +105,14 @@ export async function PUT(req: NextRequest) {
       );
     }
 
-    const { data: data } = await supabaseAdmin.from('profiles').select('*').eq('id', userId).single();
+    const { data } = await supabaseAdmin.from('profiles').select('*').eq('id', userId).single();
 
     return NextResponse.json({
       user: {
         id: data.id,
         fullName: data.full_name,
         username: data.username,
+        email: data.email || '',
         phone: data.phone,
         role: data.role,
         isActivated: Boolean(data.is_activated),
