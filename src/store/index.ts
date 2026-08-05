@@ -39,6 +39,9 @@ interface PendingRegistration {
   phone: string;
 }
 
+// Incremented on every login/logout to cancel stale async init fetches
+let sessionGeneration = 0;
+
 interface AppState {
   view: ViewName;
   setView: (v: ViewName) => void;
@@ -64,8 +67,12 @@ export const useAppStore = create<AppState>((set) => ({
   setUser: (u) => set({ user: u }),
   token: null,
   setToken: (t) => {
-    if (t) localStorage.setItem('alcoin_token', t);
-    else localStorage.removeItem('alcoin_token');
+    if (t) {
+      localStorage.setItem('alcoin_token', t);
+      sessionGeneration++; // New session = cancel any pending init
+    } else {
+      localStorage.removeItem('alcoin_token');
+    }
     set({ token: t });
   },
   wallets: { reward: 0, deposit: 0, profit: 0 },
@@ -77,6 +84,7 @@ export const useAppStore = create<AppState>((set) => ({
   pendingRegistration: null,
   setPendingRegistration: (p) => set({ pendingRegistration: p }),
   logout: () => {
+    sessionGeneration++; // Cancel any pending initializeStore fetch
     localStorage.removeItem('alcoin_token');
     set({ user: null, token: null, view: 'login', wallets: { reward: 0, deposit: 0, profit: 0 } });
   },
@@ -84,28 +92,37 @@ export const useAppStore = create<AppState>((set) => ({
 
 export function initializeStore() {
   const token = localStorage.getItem('alcoin_token');
-  if (token) {
-    useAppStore.getState().setToken(token);
-    fetch('/api/auth/session', {
-      headers: { Authorization: `Bearer ${token}` },
-    })
-      .then(r => r.json())
-      .then(data => {
-        if (data.user) {
-          useAppStore.getState().setUser(data.user);
-          if (data.user.role === 'admin') {
-            useAppStore.getState().setView('admin-dashboard');
-          } else if (!data.user.isActivated) {
-            useAppStore.getState().setView('activate');
-          } else {
-            useAppStore.getState().setView('dashboard');
-          }
+  if (!token) return;
+
+  const myGeneration = sessionGeneration;
+  useAppStore.getState().setToken(token);
+
+  fetch('/api/auth/session', {
+    headers: { Authorization: `Bearer ${token}` },
+  })
+    .then(r => r.json())
+    .then(data => {
+      // Guard: discard if a new login/logout happened while we were fetching
+      if (myGeneration !== sessionGeneration) return;
+
+      if (data.user) {
+        useAppStore.getState().setUser(data.user);
+        if (data.user.role === 'admin') {
+          useAppStore.getState().setView('admin-dashboard');
+        } else if (!data.user.isActivated) {
+          useAppStore.getState().setView('activate');
         } else {
-          useAppStore.getState().logout();
+          useAppStore.getState().setView('dashboard');
         }
-      })
-      .catch(() => useAppStore.getState().logout());
-  }
+      } else {
+        useAppStore.getState().logout();
+      }
+    })
+    .catch(() => {
+      if (myGeneration === sessionGeneration) {
+        useAppStore.getState().logout();
+      }
+    });
 }
 
 export async function apiFetch(endpoint: string, options: RequestInit = {}) {
