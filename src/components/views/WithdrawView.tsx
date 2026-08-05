@@ -9,9 +9,8 @@ import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
 import {
-  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
-} from '@/components/ui/select';
-import { ArrowLeft, Wallet, AlertCircle, Clock, CheckCircle2, XCircle, Banknote } from 'lucide-react';
+  ArrowLeft, Wallet, AlertCircle, Clock, CheckCircle2, XCircle, Banknote, Building2, Landmark,
+} from 'lucide-react';
 
 function formatNaira(amount: number) {
   return `\u20a6${amount.toLocaleString()}`;
@@ -39,7 +38,7 @@ const walletOptions = [
 ];
 
 export default function WithdrawView() {
-  const { wallets, setWallets, setView } = useAppStore();
+  const { wallets, setWallets, setView, user } = useAppStore();
   const [selectedWallet, setSelectedWallet] = useState('reward');
   const [amount, setAmount] = useState('');
   const [loading, setLoading] = useState(false);
@@ -120,34 +119,6 @@ export default function WithdrawView() {
           </motion.div>
         )}
 
-        {/* Wallet Balances */}
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          className="space-y-2"
-        >
-          {walletOptions.map((w, i) => (
-            <motion.div
-              key={w.value}
-              initial={{ opacity: 0, x: -10 }}
-              animate={{ opacity: 1, x: 0 }}
-              transition={{ delay: i * 0.05 }}
-              className={`glass rounded-xl p-3 flex items-center justify-between cursor-pointer transition-colors ${
-                selectedWallet === w.value ? 'border-gold/40 bg-gold/5' : 'hover:bg-white/5'
-              } border border-transparent`}
-              onClick={() => setSelectedWallet(w.value)}
-            >
-              <div className="flex items-center gap-3">
-                <Wallet className={`w-4 h-4 ${selectedWallet === w.value ? 'text-gold' : 'text-muted-foreground'}`} />
-                <span className="text-sm">{w.label}</span>
-              </div>
-              <span className={`text-sm font-semibold ${selectedWallet === w.value ? 'text-gold' : ''}`}>
-                {formatNaira(wallets[w.balanceKey])}
-              </span>
-            </motion.div>
-          ))}
-        </motion.div>
-
         {/* Withdrawal Form */}
         <motion.form
           initial={{ opacity: 0, y: 20 }}
@@ -158,19 +129,60 @@ export default function WithdrawView() {
         >
           <div className="space-y-2">
             <Label className="text-sm text-muted-foreground">Withdraw From</Label>
-            <Select value={selectedWallet} onValueChange={setSelectedWallet}>
-              <SelectTrigger className="bg-white/5 border-white/10 h-12">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {walletOptions.map((w) => (
-                  <SelectItem key={w.value} value={w.value}>
-                    {w.label} — {formatNaira(wallets[w.balanceKey])}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            <div className="grid grid-cols-1 gap-2">
+              {walletOptions.map((w) => (
+                <button
+                  type="button"
+                  key={w.value}
+                  onClick={() => setSelectedWallet(w.value)}
+                  className={`rounded-xl p-3 flex items-center justify-between transition-colors text-left ${
+                    selectedWallet === w.value ? 'glass-strong border-gold/40 bg-gold/5' : 'glass hover:bg-white/5'
+                  } border border-transparent`}
+                >
+                  <div className="flex items-center gap-3">
+                    <Wallet className={`w-4 h-4 ${selectedWallet === w.value ? 'text-gold' : 'text-muted-foreground'}`} />
+                    <span className="text-sm">{w.label}</span>
+                  </div>
+                  <span className={`text-sm font-semibold ${selectedWallet === w.value ? 'text-gold' : ''}`}>
+                    {formatNaira(wallets[w.balanceKey])}
+                  </span>
+                </button>
+              ))}
+            </div>
           </div>
+
+          {/* Bank Details Display */
+          {user?.bankName && user?.bankAccount && user?.bankAccountName ? (
+            <div className="rounded-2xl p-4 glass border-alcoin-blue/20 space-y-3">
+              <div className="flex items-center gap-2">
+                <Landmark className="w-4 h-4 text-alcoin-blue" />
+                <h3 className="text-sm font-semibold">Payment To</h3>
+              </div>
+              <div className="space-y-2">
+                <div className="flex items-center gap-2">
+                  <Building2 className="w-3.5 h-3.5 text-muted-foreground" />
+                  <span className="text-sm">{user.bankName}</span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <Wallet className="w-3.5 h-3.5 text-muted-foreground" />
+                    <span className="text-sm font-mono tracking-wider">{user.bankAccount}</span>
+                  </div>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Banknote className="w-3.5 h-3.5 text-muted-foreground" />
+                  <span className="text-sm">{user.bankAccountName}</span>
+                </div>
+              </div>
+            </div>
+          ) : (
+            <div className="rounded-2xl p-4 bg-yellow-500/5 border border-yellow-500/20">
+              <p className="text-sm text-yellow-400">
+                <AlertCircle className="w-4 h-4 inline mr-1" />
+                No bank details set. Please update your bank details in your profile before withdrawing.
+              </p>
+            </div>
+          )}
 
           <div className="space-y-2">
             <Label htmlFor="withdrawAmount" className="text-sm text-muted-foreground">

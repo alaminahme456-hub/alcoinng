@@ -64,6 +64,9 @@ export async function POST(req: NextRequest) {
       user_id: auth.id,
       wallet,
       amount: numAmount,
+      bank_name: auth.profile.bankName,
+      bank_account: auth.profile.bankAccount,
+      bank_account_name: auth.profile.bankAccountName,
     }).select().single();
 
     await insertNotification(auth.id, 'Withdrawal Requested', `Your withdrawal of \u20a6${numAmount.toLocaleString()} from ${wallet} wallet is pending review.`, 'withdrawal');
