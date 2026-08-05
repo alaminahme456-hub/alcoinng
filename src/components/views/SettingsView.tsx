@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { motion } from 'framer-motion';
 import { useAppStore, apiFetch } from '@/store';
+import { useAuth } from '@clerk/nextjs';
 import { Button } from '@/components/ui/button';
 import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
@@ -24,6 +25,7 @@ interface NotifPrefs {
 
 export default function SettingsView() {
   const { user, logout, setView } = useAppStore();
+  const { signOut } = useAuth();
   const [showLogoutDialog, setShowLogoutDialog] = useState(false);
   const [loggingOut, setLoggingOut] = useState(false);
 
@@ -61,11 +63,14 @@ export default function SettingsView() {
   const handleLogout = async () => {
     setLoggingOut(true);
     try {
-      await apiFetch('/api/auth/logout', { method: 'POST' });
+      await signOut();
+      logout();
     } catch {
-      // silent
+      logout();
+    } finally {
+      setLoggingOut(false);
+      setShowLogoutDialog(false);
     }
-    logout();
   };
 
   const notifItems = [

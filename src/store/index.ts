@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 
 export type ViewName = 
-  | 'login' | 'register' | 'verify-otp'
+  | 'login' | 'register' | 'verify-otp' | 'complete-profile'
   | 'dashboard' | 'activate' | 'deposit'
   | 'ads' | 'tasks' | 'market' | 'referral' | 'withdraw'
   | 'notifications' | 'profile' | 'settings'
@@ -31,14 +31,6 @@ interface WalletData {
   profit: number;
 }
 
-interface PendingRegistration {
-  email: string;
-  password: string;
-  fullName: string;
-  username: string;
-  phone: string;
-}
-
 // Incremented on every login/logout to cancel stale async init fetches
 let sessionGeneration = 0;
 
@@ -55,8 +47,6 @@ interface AppState {
   setUnreadCount: (n: number) => void;
   sidebarOpen: boolean;
   setSidebarOpen: (o: boolean) => void;
-  pendingRegistration: PendingRegistration | null;
-  setPendingRegistration: (p: PendingRegistration | null) => void;
   logout: () => void;
 }
 
@@ -66,14 +56,9 @@ export const useAppStore = create<AppState>((set) => ({
   user: null,
   setUser: (u) => set({ user: u }),
   token: null,
-  setToken: (t) => {
-    if (t) {
-      localStorage.setItem('alcoin_token', t);
-      sessionGeneration++; // New session = cancel any pending init
-    } else {
-      localStorage.removeItem('alcoin_token');
-    }
-    set({ token: t });
+  setToken: () => {
+    // No-op: Clerk manages sessions via cookies, no localStorage token needed.
+    // Kept for interface compatibility.
   },
   wallets: { reward: 0, deposit: 0, profit: 0 },
   setWallets: (w) => set({ wallets: w }),
@@ -81,27 +66,22 @@ export const useAppStore = create<AppState>((set) => ({
   setUnreadCount: (n) => set({ unreadCount: n }),
   sidebarOpen: false,
   setSidebarOpen: (o) => set({ sidebarOpen: o }),
-  pendingRegistration: null,
-  setPendingRegistration: (p) => set({ pendingRegistration: p }),
   logout: () => {
-    sessionGeneration++; // Cancel any pending initializeStore fetch
-    localStorage.removeItem('alcoin_token');
+    sessionGeneration++;
     set({ user: null, token: null, view: 'login', wallets: { reward: 0, deposit: 0, profit: 0 } });
   },
 }));
 
+/**
+ * Initialize store — check session via Clerk cookie (no localStorage token).
+ * Called once on app mount.
+ */
 export function initializeStore() {
-  const token = localStorage.getItem('alcoin_token');
-  if (!token) return;
-
   const myGeneration = sessionGeneration;
-  useAppStore.getState().setToken(token);
 
-  fetch('/api/auth/session', {
-    headers: { Authorization: `Bearer ${token}` },
-  })
-    .then(r => r.json())
-    .then(data => {
+  fetch('/api/auth/session')
+    .then((r) => r.json())
+    .then((data) => {
       // Guard: discard if a new login/logout happened while we were fetching
       if (myGeneration !== sessionGeneration) return;
 
@@ -114,24 +94,22 @@ export function initializeStore() {
         } else {
           useAppStore.getState().setView('dashboard');
         }
-      } else {
-        useAppStore.getState().logout();
       }
+      // If no user (not authenticated), stay on login view (default)
     })
     .catch(() => {
-      if (myGeneration === sessionGeneration) {
-        useAppStore.getState().logout();
-      }
+      // Stay on login view
     });
 }
 
+/**
+ * API fetch helper — no Bearer token needed, Clerk sends session via cookies.
+ */
 export async function apiFetch(endpoint: string, options: RequestInit = {}) {
-  const token = useAppStore.getState().token;
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
     ...(options.headers as Record<string, string>),
   };
-  if (token) headers['Authorization'] = `Bearer ${token}`;
   const res = await fetch(endpoint, { ...options, headers });
   const text = await res.text();
   let data: any;

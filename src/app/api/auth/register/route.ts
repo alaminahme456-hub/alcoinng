@@ -1,30 +1,46 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabase/admin';
 import { mapProfileRow, ensureWallets, insertAuditLog } from '@/lib/db';
-import { generateReferralCode, hashPassword, signToken } from '@/lib/auth';
+import { generateReferralCode } from '@/lib/auth';
+import { auth, currentUser } from '@clerk/nextjs/server';
 
+/**
+ * POST /api/auth/register
+ * Called after Clerk sign-up to create/update the Supabase profile.
+ * Body: { username, phone, referralCode?, email, fullName? }
+ */
 export async function POST(req: NextRequest) {
   try {
-    const { fullName, username, email, phone, password, referralCode } = await req.json();
-
-    if (!fullName || !username || !email || !phone || !password) {
-      return NextResponse.json({ error: 'All fields are required' }, { status: 400 });
+    const { userId } = await auth();
+    if (!userId) {
+      return NextResponse.json({ error: 'Not authenticated' }, { status: 401 });
     }
 
-    if (password.length < 6) {
-      return NextResponse.json({ error: 'Password must be at least 6 characters' }, { status: 400 });
+    const { username, phone, referralCode, email, fullName } = await req.json();
+
+    if (!username || !phone) {
+      return NextResponse.json({ error: 'Username and phone are required' }, { status: 400 });
     }
 
-    const emailLower = email.toLowerCase();
+    // Get email/fullName from Clerk if not provided
+    const clerkUser = await currentUser();
+    const emailToUse = email || clerkUser?.emailAddresses?.[0]?.emailAddress || '';
+    const fullNameToUse = fullName || clerkUser?.fullName || clerkUser?.firstName || '';
 
-    // Check email uniqueness in profiles table
-    const { data: existingEmail } = await supabaseAdmin
+    if (!emailToUse) {
+      return NextResponse.json({ error: 'Email is required' }, { status: 400 });
+    }
+
+    // Check if profile already exists for this Clerk user
+    const { data: existingProfile } = await supabaseAdmin
       .from('profiles')
-      .select('id')
-      .eq('email', emailLower)
+      .select('*')
+      .eq('clerk_id', userId)
       .single();
-    if (existingEmail) {
-      return NextResponse.json({ error: 'Email already registered' }, { status: 409 });
+
+    if (existingProfile) {
+      // Profile exists — return it
+      return NextResponse.json({ user: mapProfileRow(existingProfile) }, { status: 200 });
     }
 
     // Check username uniqueness
@@ -35,6 +51,16 @@ export async function POST(req: NextRequest) {
       .single();
     if (existingUsername) {
       return NextResponse.json({ error: 'Username already taken' }, { status: 409 });
+    }
+
+    // Check email uniqueness
+    const { data: existingEmail } = await supabaseAdmin
+      .from('profiles')
+      .select('id')
+      .eq('email', emailToUse.toLowerCase())
+      .single();
+    if (existingEmail) {
+      return NextResponse.json({ error: 'Email already registered' }, { status: 409 });
     }
 
     // Validate referral code if provided
@@ -64,18 +90,15 @@ export async function POST(req: NextRequest) {
       if (codeExists) finalReferralCode = generateReferralCode();
     }
 
-    // Hash the password
-    const passwordHash = await hashPassword(password);
-
-    // Create profile with email and password_hash directly
+    // Create profile
     const { data: newProfile, error: profileError } = await supabaseAdmin
       .from('profiles')
       .insert({
-        full_name: fullName,
+        full_name: fullNameToUse,
         username,
-        email: emailLower,
+        email: emailToUse.toLowerCase(),
         phone,
-        password_hash: passwordHash,
+        clerk_id: userId,
         referral_code: finalReferralCode,
         referred_by: referrerId || null,
         email_verified: true,
@@ -84,28 +107,16 @@ export async function POST(req: NextRequest) {
       .single();
 
     if (profileError || !newProfile) {
-      return NextResponse.json({ error: profileError?.message || 'Failed to create account' }, { status: 500 });
+      return NextResponse.json({ error: profileError?.message || 'Failed to create profile' }, { status: 500 });
     }
 
-    const userId = newProfile.id;
-
     // Create wallets
-    await ensureWallets(userId);
+    await ensureWallets(newProfile.id);
 
     // Audit log
-    await insertAuditLog(userId, 'user.registered', `Registered as @${username}`);
+    await insertAuditLog(newProfile.id, 'user.registered', `Registered as @${username}`);
 
-    // Sign custom JWT
-    const token = await signToken({
-      id: userId,
-      email: emailLower,
-      role: newProfile.role as string,
-    });
-
-    return NextResponse.json({
-      user: mapProfileRow(newProfile),
-      token,
-    }, { status: 201 });
+    return NextResponse.json({ user: mapProfileRow(newProfile) }, { status: 201 });
   } catch (error: unknown) {
     console.error('Register error:', error);
     const message = error instanceof Error ? error.message : 'Registration failed';

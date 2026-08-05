@@ -1,60 +1,32 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { supabaseAdmin } from '@/lib/supabase/admin';
-import { mapProfileRow, insertAuditLog } from '@/lib/db';
-import { verifyOTP, storeOTP, verifyPassword, signToken } from '@/lib/auth';
+import { getAuthUser } from '@/lib/auth';
+import { verifyOTP, storeOTP } from '@/lib/auth';
+import { insertAuditLog } from '@/lib/db';
 
+/**
+ * POST /api/auth/verify-otp
+ * Verifies an OTP code for the authenticated user.
+ */
 export async function POST(req: NextRequest) {
   try {
-    const { email, otp, password } = await req.json();
-
-    if (!email || !otp || !password) {
-      return NextResponse.json({ error: 'Email, OTP, and password are required' }, { status: 400 });
+    const authUser = await getAuthUser();
+    if (!authUser) {
+      return NextResponse.json({ error: 'Not authenticated' }, { status: 401 });
     }
 
-    // Find user by email in profiles table
-    const { data: profile } = await supabaseAdmin
-      .from('profiles')
-      .select('*')
-      .eq('email', email.toLowerCase())
-      .single();
-
-    if (!profile) {
-      return NextResponse.json({ error: 'User not found' }, { status: 404 });
+    const { otp } = await req.json();
+    if (!otp) {
+      return NextResponse.json({ error: 'OTP is required' }, { status: 400 });
     }
 
-    // Verify password
-    if (!profile.password_hash) {
-      return NextResponse.json({ error: 'Invalid credentials' }, { status: 401 });
-    }
-    const valid = await verifyPassword(password, profile.password_hash);
-    if (!valid) {
-      return NextResponse.json({ error: 'Invalid credentials' }, { status: 401 });
-    }
-
-    // Verify OTP
-    const verified = await verifyOTP(profile.id, otp);
+    const verified = await verifyOTP(authUser.id, otp);
     if (!verified) {
       return NextResponse.json({ error: 'Invalid or expired OTP. Please check and try again.' }, { status: 401 });
     }
 
-    // Sign custom JWT
-    const token = await signToken({
-      id: profile.id,
-      email: profile.email,
-      role: profile.role,
-    });
+    await insertAuditLog(authUser.id, 'user.email_verified', 'Email verified via OTP');
 
-    // Audit log
-    await insertAuditLog(profile.id, 'user.email_verified', 'Email verified via OTP');
-
-    // Fetch updated profile
-    const { data: updatedProfile } = await supabaseAdmin
-      .from('profiles')
-      .select('*')
-      .eq('id', profile.id)
-      .single();
-
-    return NextResponse.json({ user: mapProfileRow(updatedProfile!), token });
+    return NextResponse.json({ user: authUser.profile, message: 'OTP verified successfully' });
   } catch (error: unknown) {
     console.error('Verify OTP error:', error);
     const message = error instanceof Error ? error.message : 'OTP verification failed';
@@ -62,31 +34,19 @@ export async function POST(req: NextRequest) {
   }
 }
 
-// Resend OTP endpoint
-export async function PUT(req: NextRequest) {
+/**
+ * PUT /api/auth/verify-otp
+ * Resends OTP for the authenticated user.
+ */
+export async function PUT() {
   try {
-    const { email } = await req.json();
-
-    if (!email) {
-      return NextResponse.json({ error: 'Email is required' }, { status: 400 });
+    const authUser = await getAuthUser();
+    if (!authUser) {
+      return NextResponse.json({ error: 'Not authenticated' }, { status: 401 });
     }
 
-    // Find user by email in profiles table
-    const { data: profile } = await supabaseAdmin
-      .from('profiles')
-      .select('id')
-      .eq('email', email.toLowerCase())
-      .single();
-
-    if (!profile) {
-      return NextResponse.json({ error: 'User not found' }, { status: 404 });
-    }
-
-    // Generate and store new OTP
-    const otpCode = await storeOTP(profile.id);
-
-    // Audit log
-    await insertAuditLog(profile.id, 'user.otp_resent', 'OTP code resent');
+    const otpCode = await storeOTP(authUser.id);
+    await insertAuditLog(authUser.id, 'user.otp_resent', 'OTP code resent');
 
     return NextResponse.json({ message: 'OTP resent successfully', otp: otpCode });
   } catch (error: unknown) {

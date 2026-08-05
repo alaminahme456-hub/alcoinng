@@ -1,49 +1,9 @@
-import { SignJWT, jwtVerify } from 'jose';
-import bcrypt from 'bcryptjs';
+import { auth, currentUser } from '@clerk/nextjs/server';
 import { supabaseAdmin } from './supabase/admin';
 import { mapProfileRow } from './db';
 
 // ============================================================
-// JWT Configuration
-// ============================================================
-
-const JWT_SECRET = new TextEncoder().encode(
-  process.env.JWT_SECRET || 'alcoin-default-secret-change-in-production'
-);
-
-const TOKEN_EXPIRY = '7d';
-
-export async function hashPassword(password: string): Promise<string> {
-  return bcrypt.hash(password, 12);
-}
-
-export async function verifyPassword(password: string, hash: string): Promise<boolean> {
-  return bcrypt.compare(password, hash);
-}
-
-export async function signToken(payload: { id: string; email: string; role: string }): Promise<string> {
-  return new SignJWT(payload)
-    .setProtectedHeader({ alg: 'HS256' })
-    .setIssuedAt()
-    .setExpirationTime(TOKEN_EXPIRY)
-    .sign(JWT_SECRET);
-}
-
-export async function verifyToken(token: string): Promise<{ id: string; email: string; role: string } | null> {
-  try {
-    const { payload } = await jwtVerify(token, JWT_SECRET);
-    return {
-      id: payload.id as string,
-      email: payload.email as string,
-      role: payload.role as string,
-    };
-  } catch {
-    return null;
-  }
-}
-
-// ============================================================
-// Auth helpers for API routes
+// Auth helpers for API routes — powered by Clerk
 // ============================================================
 
 export interface AuthUser {
@@ -51,25 +11,31 @@ export interface AuthUser {
   email: string;
   role: string;
   profile: ReturnType<typeof mapProfileRow>;
+  clerkId: string;
 }
 
-export async function getAuthUser(token: string): Promise<AuthUser | null> {
+/**
+ * Get the authenticated user via Clerk session + Supabase profile.
+ * Looks up profile by clerk_id column.
+ */
+export async function getAuthUser(): Promise<AuthUser | null> {
   try {
-    const payload = await verifyToken(token);
-    if (!payload) return null;
+    const { userId } = await auth();
+    if (!userId) return null;
 
     const { data: profile } = await supabaseAdmin
       .from('profiles')
       .select('*')
-      .eq('id', payload.id)
+      .eq('clerk_id', userId)
       .single();
 
     if (!profile) return null;
 
     return {
-      id: payload.id,
-      email: profile.email || payload.email,
+      id: profile.id as string,
+      email: profile.email || '',
       role: profile.role as string,
+      clerkId: userId,
       profile: mapProfileRow(profile),
     };
   } catch {
@@ -77,35 +43,49 @@ export async function getAuthUser(token: string): Promise<AuthUser | null> {
   }
 }
 
-export async function getAuthAdmin(token: string): Promise<AuthUser | null> {
-  const auth = await getAuthUser(token);
-  if (!auth || auth.role !== 'admin') return null;
-  return auth;
+/**
+ * Get authenticated user — requires admin role.
+ */
+export async function getAuthAdmin(): Promise<AuthUser | null> {
+  const authUser = await getAuthUser();
+  if (!authUser || authUser.role !== 'admin') return null;
+  return authUser;
+}
+
+/**
+ * Get the Clerk user object (email, name, etc.) from the current request.
+ */
+export async function getClerkUser() {
+  try {
+    return await currentUser();
+  } catch {
+    return null;
+  }
 }
 
 // ============================================================
-// OTP helpers (data-only, no Supabase Auth)
+// OTP helpers (data-only, stored in profiles table)
 // ============================================================
 
 export function generateOTP(): string {
   return Math.floor(100000 + Math.random() * 900000).toString();
 }
 
-export async function storeOTP(userId: string): Promise<string> {
+export async function storeOTP(profileId: string): Promise<string> {
   const otp = generateOTP();
   const expiresAt = new Date(Date.now() + 10 * 60 * 1000).toISOString();
   await supabaseAdmin
     .from('profiles')
     .update({ otp_code: otp, otp_expires_at: expiresAt })
-    .eq('id', userId);
+    .eq('id', profileId);
   return otp;
 }
 
-export async function verifyOTP(userId: string, code: string): Promise<boolean> {
+export async function verifyOTP(profileId: string, code: string): Promise<boolean> {
   const { data: profile } = await supabaseAdmin
     .from('profiles')
     .select('otp_code, otp_expires_at')
-    .eq('id', userId)
+    .eq('id', profileId)
     .single();
 
   if (!profile || !profile.otp_code) return false;
@@ -115,7 +95,7 @@ export async function verifyOTP(userId: string, code: string): Promise<boolean> 
   await supabaseAdmin
     .from('profiles')
     .update({ otp_code: null, otp_expires_at: null, email_verified: true })
-    .eq('id', userId);
+    .eq('id', profileId);
 
   return true;
 }
