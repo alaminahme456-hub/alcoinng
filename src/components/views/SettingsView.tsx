@@ -63,10 +63,11 @@ export default function SettingsView() {
   const handleLogout = async () => {
     setLoggingOut(true);
     try {
-      await signOut();
+      await signOut({ redirectUrl: '/' });
       logout();
     } catch {
       logout();
+      window.location.href = '/';
     } finally {
       setLoggingOut(false);
       setShowLogoutDialog(false);
