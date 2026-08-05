@@ -25,7 +25,7 @@ export default function ActivateView() {
     setLoading(true);
     setError('');
     try {
-      const data = await apiFetch('/api/user/activate', {
+      const data = await apiFetch('/api/activate', {
         method: 'POST',
         body: JSON.stringify({ code: code.trim() }),
       });

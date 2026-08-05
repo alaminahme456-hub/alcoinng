@@ -34,9 +34,15 @@ export async function POST(req: NextRequest) {
       redeemed_at: now,
     }).eq('id', activationCode.id);
 
+    const { data: updatedProfile } = await supabaseAdmin
+      .from('profiles')
+      .select('*')
+      .eq('id', auth.id)
+      .single();
+
     await insertAuditLog(auth.id, 'ACTIVATE_ACCOUNT', `Activated with code ${activationCode.code}`);
 
-    return NextResponse.json({ message: 'Account activated successfully' });
+    return NextResponse.json({ message: 'Account activated successfully', user: updatedProfile });
   } catch (error: unknown) {
     console.error('Activation error:', error);
     const message = error instanceof Error ? error.message : 'Activation failed';
