@@ -41,6 +41,9 @@ export default function WithdrawView() {
   const { wallets, setWallets, setView, user } = useAppStore();
   const [selectedWallet, setSelectedWallet] = useState('reward');
   const [amount, setAmount] = useState('');
+  const [bankName, setBankName] = useState(user?.bankName || '');
+  const [bankAccount, setBankAccount] = useState(user?.bankAccount || '');
+  const [bankAccountName, setBankAccountName] = useState(user?.bankAccountName || '');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState(false);
@@ -71,12 +74,16 @@ export default function WithdrawView() {
       setError('Enter a valid amount');
       return;
     }
+    if (!bankName.trim() || !bankAccount.trim() || !bankAccountName.trim()) {
+      setError('Please fill in all bank details');
+      return;
+    }
     setLoading(true);
     setError('');
     try {
       const data = await apiFetch('/api/withdraw', {
         method: 'POST',
-        body: JSON.stringify({ wallet: selectedWallet, amount: numAmount }),
+        body: JSON.stringify({ wallet: selectedWallet, amount: numAmount, bankName: bankName.trim(), bankAccount: bankAccount.trim(), bankAccountName: bankAccountName.trim() }),
       });
       if (data.wallets) {
         const getBal = (w: any) => typeof w === 'object' && w !== null ? (w.balance ?? 0) : (w ?? 0);
@@ -151,38 +158,67 @@ export default function WithdrawView() {
             </div>
           </div>
 
-          {/* Bank Details Display */}
-          {user?.bankName && user?.bankAccount && user?.bankAccountName ? (
-            <div className="rounded-2xl p-4 glass border-alcoin-blue/20 space-y-3">
-              <div className="flex items-center gap-2">
-                <Landmark className="w-4 h-4 text-alcoin-blue" />
-                <h3 className="text-sm font-semibold">Payment To</h3>
+          {/* Account Info */}
+          <div className="rounded-2xl p-4 glass border-alcoin-blue/20 space-y-2">
+            <div className="flex items-center gap-2">
+              <Landmark className="w-4 h-4 text-alcoin-blue" />
+              <h3 className="text-sm font-semibold">Your Account</h3>
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="text-xs text-muted-foreground w-14">Email:</span>
+              <span className="text-sm">{user?.email || 'N/A'}</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="text-xs text-muted-foreground w-14">User ID:</span>
+              <span className="text-xs font-mono text-muted-foreground">{user?.id?.slice(0, 8)}...</span>
+            </div>
+          </div>
+
+          {/* Bank Details Input */}
+          <div className="space-y-3">
+            <div className="flex items-center gap-2">
+              <Building2 className="w-4 h-4 text-alcoin-blue" />
+              <h3 className="text-sm font-semibold">Bank Details</h3>
+            </div>
+            <div className="space-y-2">
+              <div className="space-y-1">
+                <Label htmlFor="bankName" className="text-xs text-muted-foreground">Bank Name</Label>
+                <Input
+                  id="bankName"
+                  type="text"
+                  placeholder="e.g. Access Bank"
+                  value={bankName}
+                  onChange={(e) => setBankName(e.target.value)}
+                  className="bg-white/5 border-white/10 focus:border-gold h-11"
+                  required
+                />
               </div>
-              <div className="space-y-2">
-                <div className="flex items-center gap-2">
-                  <Building2 className="w-3.5 h-3.5 text-muted-foreground" />
-                  <span className="text-sm">{user.bankName}</span>
-                </div>
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <Wallet className="w-3.5 h-3.5 text-muted-foreground" />
-                    <span className="text-sm font-mono tracking-wider">{user.bankAccount}</span>
-                  </div>
-                </div>
-                <div className="flex items-center gap-2">
-                  <Banknote className="w-3.5 h-3.5 text-muted-foreground" />
-                  <span className="text-sm">{user.bankAccountName}</span>
-                </div>
+              <div className="space-y-1">
+                <Label htmlFor="bankAccount" className="text-xs text-muted-foreground">Account Number</Label>
+                <Input
+                  id="bankAccount"
+                  type="text"
+                  placeholder="Enter account number"
+                  value={bankAccount}
+                  onChange={(e) => setBankAccount(e.target.value)}
+                  className="bg-white/5 border-white/10 focus:border-gold h-11 font-mono"
+                  required
+                />
+              </div>
+              <div className="space-y-1">
+                <Label htmlFor="bankAccountName" className="text-xs text-muted-foreground">Account Name</Label>
+                <Input
+                  id="bankAccountName"
+                  type="text"
+                  placeholder="Enter account name"
+                  value={bankAccountName}
+                  onChange={(e) => setBankAccountName(e.target.value)}
+                  className="bg-white/5 border-white/10 focus:border-gold h-11"
+                  required
+                />
               </div>
             </div>
-          ) : (
-            <div className="rounded-2xl p-4 bg-yellow-500/5 border border-yellow-500/20">
-              <p className="text-sm text-yellow-400">
-                <AlertCircle className="w-4 h-4 inline mr-1" />
-                No bank details set. Please update your bank details in your profile before withdrawing.
-              </p>
-            </div>
-          )}
+          </div>
 
           <div className="space-y-2">
             <Label htmlFor="withdrawAmount" className="text-sm text-muted-foreground">
@@ -218,7 +254,7 @@ export default function WithdrawView() {
 
           <Button
             type="submit"
-            disabled={loading || !amount}
+            disabled={loading || !amount || !bankName.trim() || !bankAccount.trim() || !bankAccountName.trim()}
             className="w-full gradient-gold text-gold-foreground font-semibold h-12"
           >
             {loading ? (
@@ -255,7 +291,7 @@ export default function WithdrawView() {
             </li>
             <li className="flex items-start gap-2">
               <span className="w-1.5 h-1.5 rounded-full bg-alcoin-blue shrink-0 mt-2" />
-              <span>Ensure your bank details are set in your profile</span>
+              <span>Enter your bank details for each withdrawal</span>
             </li>
             <li className="flex items-start gap-2">
               <span className="w-1.5 h-1.5 rounded-full bg-alcoin-blue shrink-0 mt-2" />

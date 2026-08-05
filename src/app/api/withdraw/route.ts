@@ -8,15 +8,15 @@ export async function POST(req: NextRequest) {
     const auth = await requireAuth(req);
     if (!isAuthUser(auth)) return auth;
 
-    const { wallet, amount } = await req.json();
+    const { wallet, amount, bankName, bankAccount, bankAccountName } = await req.json();
     if (!wallet || !amount) return NextResponse.json({ error: 'Wallet type and amount are required' }, { status: 400 });
     if (!['reward', 'deposit', 'profit'].includes(wallet)) return NextResponse.json({ error: 'Invalid wallet type' }, { status: 400 });
 
     const numAmount = Number(amount);
     if (numAmount <= 0) return NextResponse.json({ error: 'Amount must be positive' }, { status: 400 });
     if (!auth.profile.isActivated) return NextResponse.json({ error: 'Account must be activated' }, { status: 403 });
-    if (!auth.profile.bankName || !auth.profile.bankAccount || !auth.profile.bankAccountName) {
-      return NextResponse.json({ error: 'Please update your bank details before withdrawing' }, { status: 400 });
+    if (!bankName || !bankAccount || !bankAccountName) {
+      return NextResponse.json({ error: 'Bank name, account number, and account name are required' }, { status: 400 });
     }
 
     // Check minimum amounts for reward wallet
@@ -64,9 +64,9 @@ export async function POST(req: NextRequest) {
       user_id: auth.id,
       wallet,
       amount: numAmount,
-      bank_name: auth.profile.bankName,
-      bank_account: auth.profile.bankAccount,
-      bank_account_name: auth.profile.bankAccountName,
+      bank_name: bankName,
+      bank_account: bankAccount,
+      bank_account_name: bankAccountName,
     }).select().single();
 
     await insertNotification(auth.id, 'Withdrawal Requested', `Your withdrawal of \u20a6${numAmount.toLocaleString()} from ${wallet} wallet is pending review.`, 'withdrawal');
