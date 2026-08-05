@@ -277,18 +277,17 @@ export default function AuthView() {
                     value={otp}
                     onChange={setOtp}
                     disabled={otpLoading || otpSuccess}
-                    render={({ slots }) => (
-                      <InputOTPGroup>
-                        {slots.slice(0, 3).map((slot, i) => (
-                          <InputOTPSlot key={i} {...slot} index={i} className="h-12 w-12 text-lg bg-white/5 border-white/10 data-[active=true]:border-gold data-[active=true]:ring-gold/30" />
-                        ))}
-                        <InputOTPSeparator className="mx-1" />
-                        {slots.slice(3, 6).map((slot, i) => (
-                          <InputOTPSlot key={i + 3} {...slot} index={i + 3} className="h-12 w-12 text-lg bg-white/5 border-white/10 data-[active=true]:border-gold data-[active=true]:ring-gold/30" />
-                        ))}
-                      </InputOTPGroup>
-                    )}
-                  />
+                  >
+                    <InputOTPGroup>
+                      <InputOTPSlot index={0} className="h-12 w-12 text-lg bg-white/5 border-white/10 data-[active=true]:border-gold data-[active=true]:ring-gold/30" />
+                      <InputOTPSlot index={1} className="h-12 w-12 text-lg bg-white/5 border-white/10 data-[active=true]:border-gold data-[active=true]:ring-gold/30" />
+                      <InputOTPSlot index={2} className="h-12 w-12 text-lg bg-white/5 border-white/10 data-[active=true]:border-gold data-[active=true]:ring-gold/30" />
+                      <InputOTPSeparator className="mx-1" />
+                      <InputOTPSlot index={3} className="h-12 w-12 text-lg bg-white/5 border-white/10 data-[active=true]:border-gold data-[active=true]:ring-gold/30" />
+                      <InputOTPSlot index={4} className="h-12 w-12 text-lg bg-white/5 border-white/10 data-[active=true]:border-gold data-[active=true]:ring-gold/30" />
+                      <InputOTPSlot index={5} className="h-12 w-12 text-lg bg-white/5 border-white/10 data-[active=true]:border-gold data-[active=true]:ring-gold/30" />
+                    </InputOTPGroup>
+                  </InputOTP>
                 </div>
 
                 <p className="text-center text-xs text-muted-foreground">
