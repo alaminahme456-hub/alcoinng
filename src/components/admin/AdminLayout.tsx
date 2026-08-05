@@ -2,21 +2,11 @@
 
 import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
+import { useAuth } from '@clerk/nextjs';
 import {
-  LayoutDashboard,
-  Users,
-  Key,
-  CreditCard,
-  Megaphone,
-  ClipboardList,
-  ArrowDownToLine,
-  Bell,
-  BarChart3,
-  Share2,
-  Menu,
-  LogOut,
-  X,
-  Coins,
+  LayoutDashboard, Users, Key, CreditCard, Megaphone,
+  ClipboardList, ArrowDownToLine, Bell, BarChart3, Share2,
+  Menu, LogOut, X, Coins, ArrowLeft,
 } from 'lucide-react';
 import { useAppStore, ViewName } from '@/store';
 import { Button } from '@/components/ui/button';
@@ -115,8 +105,13 @@ export default function AdminLayout({
 }: {
   children: React.ReactNode;
 }) {
-  const { view, setView, user, logout } = useAppStore();
+  const { view, setView, user } = useAppStore();
+  const { signOut } = useAuth();
   const [mobileOpen, setMobileOpen] = useState(false);
+
+  const handleLogout = async () => {
+    try { await signOut({ redirectUrl: '/' }); } catch { window.location.href = '/'; }
+  };
 
   const handleNavigate = (v: ViewName) => {
     setView(v);
@@ -181,7 +176,17 @@ export default function AdminLayout({
               <Button
                 variant="ghost"
                 size="sm"
-                onClick={logout}
+                onClick={() => setView('dashboard')}
+                className="text-muted-foreground hover:text-foreground gap-2"
+              >
+                <ArrowLeft className="w-4 h-4" />
+                <span className="hidden sm:inline">Dashboard</span>
+              </Button>
+              <Separator orientation="vertical" className="h-8 opacity-20" />
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={handleLogout}
                 className="text-muted-foreground hover:text-destructive gap-2"
               >
                 <LogOut className="w-4 h-4" />

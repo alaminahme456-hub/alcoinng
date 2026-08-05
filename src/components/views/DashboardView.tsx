@@ -9,7 +9,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import {
   Home, Tv, TrendingUp, User, Bell, ShieldCheck, ShieldX,
   Wallet, PiggyBank, TrendingUpIcon, Users, ChevronRight, Lock,
-  Megaphone, CircleDot,
+  Megaphone, CircleDot, LayoutDashboard,
 } from 'lucide-react';
 
 interface Notification {
@@ -99,11 +99,14 @@ export default function DashboardView() {
     return () => clearInterval(interval);
   }, [announcements.length]);
 
+  const isAdmin = user?.role === 'admin';
+
   const navItems: { icon: typeof Home; label: string; view: ViewName }[] = [
     { icon: Home, label: 'Home', view: 'dashboard' },
     { icon: Tv, label: 'Ads', view: 'ads' },
     { icon: TrendingUp, label: 'Market', view: 'market' },
     { icon: User, label: 'Profile', view: 'profile' },
+    ...(isAdmin ? [{ icon: LayoutDashboard, label: 'Admin', view: 'admin-dashboard' as ViewName }] : []),
   ];
 
   const walletCards = [
@@ -260,12 +263,13 @@ export default function DashboardView() {
         </div>
 
         {/* Quick Actions */}
-        <div className="grid grid-cols-4 gap-3">
+        <div className={`grid gap-3 ${isAdmin ? 'grid-cols-5' : 'grid-cols-4'}`}>
           {[
             { label: 'Deposit', icon: PiggyBank, view: 'deposit' as ViewName, color: 'text-alcoin-blue' },
             { label: 'Withdraw', icon: Wallet, view: 'withdraw' as ViewName, color: 'text-gold' },
             { label: 'Referral', icon: Users, view: 'referral' as ViewName, color: 'text-emerald-400' },
             { label: 'Settings', icon: CircleDot, view: 'settings' as ViewName, color: 'text-purple-400' },
+            ...(isAdmin ? [{ label: 'Admin', icon: LayoutDashboard, view: 'admin-dashboard' as ViewName, color: 'text-gold' }] : []),
           ].map((action, i) => (
             <motion.button
               key={action.label}
