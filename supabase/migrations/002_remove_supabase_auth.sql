@@ -4,43 +4,7 @@
 -- No more dependency on auth.users table.
 -- ============================================================
 
--- Step 1: Add email and password_hash columns to profiles
-DO $$
-BEGIN
-  IF NOT EXISTS (
-    SELECT 1 FROM information_schema.columns
-    WHERE table_schema = 'public' AND table_name = 'profiles' AND column_name = 'email'
-  ) THEN
-    ALTER TABLE public.profiles ADD COLUMN email TEXT UNIQUE NOT NULL DEFAULT '';
-  END IF;
-END $$;
-
-DO $$
-BEGIN
-  IF NOT EXISTS (
-    SELECT 1 FROM information_schema.columns
-    WHERE table_schema = 'public' AND table_name = 'profiles' AND column_name = 'password_hash'
-  ) THEN
-    ALTER TABLE public.profiles ADD COLUMN password_hash TEXT NOT NULL DEFAULT '';
-  END IF;
-END $$;
-
--- Step 2: Disable RLS on all tables (service role key bypasses RLS, and we don't use Supabase Auth anymore)
-ALTER TABLE public.profiles DISABLE ROW LEVEL SECURITY;
-ALTER TABLE public.wallets DISABLE ROW LEVEL SECURITY;
-ALTER TABLE public.activation_codes DISABLE ROW LEVEL SECURITY;
-ALTER TABLE public.deposit_codes DISABLE ROW LEVEL SECURITY;
-ALTER TABLE public.ads DISABLE ROW LEVEL SECURITY;
-ALTER TABLE public.ad_views DISABLE ROW LEVEL SECURITY;
-ALTER TABLE public.tasks DISABLE ROW LEVEL SECURITY;
-ALTER TABLE public.task_submissions DISABLE ROW LEVEL SECURITY;
-ALTER TABLE public.trades DISABLE ROW LEVEL SECURITY;
-ALTER TABLE public.withdrawals DISABLE ROW LEVEL SECURITY;
-ALTER TABLE public.notifications DISABLE ROW LEVEL SECURITY;
-ALTER TABLE public.announcements DISABLE ROW LEVEL SECURITY;
-ALTER TABLE public.audit_logs DISABLE ROW LEVEL SECURITY;
-
--- Step 3: Drop all RLS policies (they reference auth.uid() and auth.role() which are Supabase Auth functions)
+-- Step 1: Drop ALL RLS policies first (they reference auth.uid() / auth.role())
 DO $$
 DECLARE
   pol record;
@@ -50,25 +14,75 @@ BEGIN
     FROM pg_policies
     WHERE schemaname = 'public'
   LOOP
-    EXECUTE format('DROP POLICY %I ON public.%I', pol.policyname, pol.tablename);
+    EXECUTE format('DROP POLICY IF EXISTS %I ON public.%I', pol.policyname, pol.tablename);
   END LOOP;
 END $$;
 
--- Step 4: Drop the foreign key constraint from profiles.id to auth.users(id)
--- and replace it with a self-generating UUID primary key
+-- Step 2: Disable RLS on all tables
+ALTER TABLE IF EXISTS public.profiles DISABLE ROW LEVEL SECURITY;
+ALTER TABLE IF EXISTS public.wallets DISABLE ROW LEVEL SECURITY;
+ALTER TABLE IF EXISTS public.activation_codes DISABLE ROW LEVEL SECURITY;
+ALTER TABLE IF EXISTS public.deposit_codes DISABLE ROW LEVEL SECURITY;
+ALTER TABLE IF EXISTS public.ads DISABLE ROW LEVEL SECURITY;
+ALTER TABLE IF EXISTS public.ad_views DISABLE ROW LEVEL SECURITY;
+ALTER TABLE IF EXISTS public.tasks DISABLE ROW LEVEL SECURITY;
+ALTER TABLE IF EXISTS public.task_submissions DISABLE ROW LEVEL SECURITY;
+ALTER TABLE IF EXISTS public.trades DISABLE ROW LEVEL SECURITY;
+ALTER TABLE IF EXISTS public.withdrawals DISABLE ROW LEVEL SECURITY;
+ALTER TABLE IF EXISTS public.notifications DISABLE ROW LEVEL SECURITY;
+ALTER TABLE IF EXISTS public.announcements DISABLE ROW LEVEL SECURITY;
+ALTER TABLE IF EXISTS public.audit_logs DISABLE ROW LEVEL SECURITY;
+
+-- Step 3: Drop the FK constraint from profiles.id → auth.users(id)
 DO $$
+DECLARE
+  fk_name text;
 BEGIN
-  -- Drop FK to auth.users if it exists
-  IF EXISTS (
-    SELECT 1 FROM information_schema.table_constraints
-    WHERE constraint_schema = 'public'
-      AND table_name = 'profiles'
-      AND constraint_type = 'FOREIGN KEY'
-      AND constraint_name LIKE '%auth%' OR constraint_name LIKE '%users%'
-  ) THEN
-    ALTER TABLE public.profiles DROP CONSTRAINT profiles_id_fkey;
+  SELECT conname INTO fk_name
+  FROM pg_constraint
+  WHERE conrelid = 'public.profiles'::regclass
+    AND contype = 'f'
+    AND confrelid = 'auth.users'::regclass;
+  
+  IF fk_name IS NOT NULL THEN
+    EXECUTE format('ALTER TABLE public.profiles DROP CONSTRAINT %I', fk_name);
   END IF;
 END $$;
 
--- Step 5: Create index on email for fast lookups
-CREATE INDEX IF NOT EXISTS idx_profiles_email ON public.profiles(email);
+-- Step 4: Add email column (nullable first, add UNIQUE after filling data)
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_schema = 'public' AND table_name = 'profiles' AND column_name = 'email'
+  ) THEN
+    ALTER TABLE public.profiles ADD COLUMN email TEXT;
+  END IF;
+END $$;
+
+-- Step 5: Add password_hash column
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_schema = 'public' AND table_name = 'profiles' AND column_name = 'password_hash'
+  ) THEN
+    ALTER TABLE public.profiles ADD COLUMN password_hash TEXT;
+  END IF;
+END $$;
+
+-- Step 6: Set email to NOT NULL with default (safe because existing rows get '')
+ALTER TABLE public.profiles ALTER COLUMN email SET DEFAULT '';
+ALTER TABLE public.profiles ALTER COLUMN email SET NOT NULL;
+
+-- Step 7: Add UNIQUE constraint on email (exclude empty strings from uniqueness)
+CREATE UNIQUE INDEX IF NOT EXISTS idx_profiles_email
+  ON public.profiles (email)
+  WHERE email != '';
+
+-- Step 8: Set password_hash to NOT NULL with default
+ALTER TABLE public.profiles ALTER COLUMN password_hash SET DEFAULT '';
+ALTER TABLE public.profiles ALTER COLUMN password_hash SET NOT NULL;
+
+-- Step 9: Add default UUID generation for profiles.id (new users won't come from auth.users)
+ALTER TABLE public.profiles ALTER COLUMN id SET DEFAULT gen_random_uuid();
