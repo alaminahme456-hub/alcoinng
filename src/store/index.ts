@@ -93,7 +93,13 @@ export function initializeStore() {
       .then(data => {
         if (data.user) {
           useAppStore.getState().setUser(data.user);
-          useAppStore.getState().setView(data.user.role === 'admin' ? 'admin-dashboard' : 'dashboard');
+          if (data.user.role === 'admin') {
+            useAppStore.getState().setView('admin-dashboard');
+          } else if (!data.user.isActivated) {
+            useAppStore.getState().setView('activate');
+          } else {
+            useAppStore.getState().setView('dashboard');
+          }
         } else {
           useAppStore.getState().logout();
         }

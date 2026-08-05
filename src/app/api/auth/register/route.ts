@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabase/admin';
 import { mapProfileRow, ensureWallets, insertAuditLog } from '@/lib/db';
-import { storeOTP, generateReferralCode } from '@/lib/auth';
+import { generateReferralCode } from '@/lib/auth';
 
 export async function POST(req: NextRequest) {
   try {
@@ -79,11 +79,10 @@ export async function POST(req: NextRequest) {
       phone,
       referral_code: finalReferralCode,
       referred_by: referrerId || null,
-      email_verified: false,
+      email_verified: true,
     });
 
     if (profileError) {
- // Clean up auth user if profile creation fails
       await supabaseAdmin.auth.admin.deleteUser(userId);
       return NextResponse.json({ error: profileError.message }, { status: 500 });
     }
@@ -91,11 +90,28 @@ export async function POST(req: NextRequest) {
     // Create wallets
     await ensureWallets(userId);
 
-    // Generate and store OTP
-    const otpCode = await storeOTP(userId);
-
     // Audit log
     await insertAuditLog(userId, 'user.registered', `Registered as @${username}`);
+
+    // Auto sign-in to get a token
+    const { data: signInData, error: signInError } = await supabaseAdmin.auth.signInWithPassword({
+      email: email.toLowerCase(),
+      password,
+    });
+
+    if (signInError || !signInData.session) {
+      // Account created but auto-login failed — user can still login manually
+      const { data: profileRow } = await supabaseAdmin
+        .from('profiles')
+        .select('*')
+        .eq('id', userId)
+        .single();
+
+      return NextResponse.json({
+        user: mapProfileRow({ ...profileRow, email }),
+        token: null,
+      }, { status: 201 });
+    }
 
     // Fetch the created profile for response
     const { data: profileRow } = await supabaseAdmin
@@ -106,9 +122,7 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({
       user: mapProfileRow({ ...profileRow, email }),
-      token: null,
-      requiresOtp: true,
-      otp: otpCode,
+      token: signInData.session.access_token,
     }, { status: 201 });
   } catch (error: unknown) {
     console.error('Register error:', error);

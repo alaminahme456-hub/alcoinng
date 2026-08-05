@@ -94,20 +94,14 @@ export default function AuthView() {
         body: JSON.stringify({ fullName, username, email, phone, password, referralCode: referralCode || undefined }),
       });
 
-      if (data.requiresOtp) {
-        // Save pending registration and switch to OTP view
-        setPendingRegistration({ email, password, fullName, username, phone });
-        setUser(data.user);
-        setView('verify-otp');
+      setToken(data.token);
+      setUser(data.user);
+      if (data.user.role === 'admin') {
+        setView('admin-dashboard');
+      } else if (!data.user.isActivated) {
+        setView('activate');
       } else {
-        // Email confirmation is off - go straight to dashboard
-        setToken(data.token);
-        setUser(data.user);
-        if (data.user.role === 'admin') {
-          setView('admin-dashboard');
-        } else {
-          setView('dashboard');
-        }
+        setView('dashboard');
       }
     } catch (err: any) {
       setRegError(err.message || 'Registration failed');
