@@ -65,7 +65,7 @@ export default function AdminActivationCodes() {
     }
     setGenLoading(true);
     try {
-      await apiFetch('/api/admin/activation-codes/generate', {
+      await apiFetch('/api/admin/activation-codes', {
         method: 'POST',
         body: JSON.stringify({ count }),
       });
@@ -84,7 +84,7 @@ export default function AdminActivationCodes() {
     if (!disableTarget) return;
     setDisableLoading(true);
     try {
-      await apiFetch(`/api/admin/activation-codes/${disableTarget.id}/disable`, { method: 'POST' });
+      await apiFetch('/api/admin/activation-codes', { method: 'PUT', body: JSON.stringify({ codeId: disableTarget.id, action: 'disable' }) });
       toast.success('Code disabled');
       fetchCodes();
     } catch (e: unknown) {

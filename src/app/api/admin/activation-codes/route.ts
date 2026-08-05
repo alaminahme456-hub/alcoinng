@@ -60,7 +60,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Count must be between 1 and 100' }, { status: 400 });
     }
 
-    const inserts = [];
+    const inserts: Array<{ code: string; value: number; status: string }> = [];
     for (let i = 0; i < numCount; i++) {
       inserts.push({
         code: generateCode(),
@@ -76,7 +76,7 @@ export async function POST(req: NextRequest) {
 
     if (error) {
       // Handle unique constraint violation - try one by one
-      const results = [];
+      const results: any[] = [];
       for (const ins of inserts) {
         const { data: row, error: e } = await supabaseAdmin
           .from('activation_codes')

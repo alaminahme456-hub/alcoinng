@@ -91,9 +91,9 @@ export default function AdminAds() {
     setSaving(true);
     try {
       if (editingAd) {
-        await apiFetch(`/api/admin/ads/${editingAd.id}`, {
+        await apiFetch('/api/admin/ads', {
           method: 'PUT',
-          body: JSON.stringify({ title: form.title, thumbnailUrl: form.thumbnailUrl, duration, reward }),
+          body: JSON.stringify({ adId: editingAd.id, title: form.title, thumbnailUrl: form.thumbnailUrl, duration, reward }),
         });
         toast.success('Ad updated');
       } else {
@@ -116,7 +116,7 @@ export default function AdminAds() {
     if (!deleteTarget) return;
     setDeleting(true);
     try {
-      await apiFetch(`/api/admin/ads/${deleteTarget.id}`, { method: 'DELETE' });
+      await apiFetch(`/api/admin/ads?adId=${deleteTarget.id}`, { method: 'DELETE' });
       toast.success('Ad deleted');
       fetchAds();
     } catch (e: unknown) {

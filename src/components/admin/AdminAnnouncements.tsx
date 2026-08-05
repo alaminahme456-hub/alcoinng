@@ -76,9 +76,9 @@ export default function AdminAnnouncements() {
     setSaving(true);
     try {
       if (editing) {
-        await apiFetch(`/api/admin/announcements/${editing.id}`, {
+        await apiFetch('/api/admin/announcements', {
           method: 'PUT',
-          body: JSON.stringify(form),
+          body: JSON.stringify({ announcementId: editing.id, ...form }),
         });
         toast.success('Announcement updated');
       } else {
@@ -101,7 +101,7 @@ export default function AdminAnnouncements() {
     if (!deleteTarget) return;
     setDeleting(true);
     try {
-      await apiFetch(`/api/admin/announcements/${deleteTarget.id}`, { method: 'DELETE' });
+      await apiFetch(`/api/admin/announcements?announcementId=${deleteTarget.id}`, { method: 'DELETE' });
       toast.success('Announcement deleted');
       fetchAnnouncements();
     } catch (e: unknown) {
@@ -115,7 +115,7 @@ export default function AdminAnnouncements() {
   const handleToggle = async (a: Announcement) => {
     setToggling(a.id);
     try {
-      await apiFetch(`/api/admin/announcements/${a.id}/toggle`, { method: 'POST' });
+      await apiFetch('/api/admin/announcements', { method: 'PUT', body: JSON.stringify({ announcementId: a.id, action: 'toggle' }) });
       toast.success(a.active ? 'Announcement hidden' : 'Announcement shown');
       fetchAnnouncements();
     } catch (e: unknown) {

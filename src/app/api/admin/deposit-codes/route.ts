@@ -64,7 +64,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Count must be between 1 and 100' }, { status: 400 });
     }
 
-    const inserts = [];
+    const inserts: Array<{ code: string; amount: number; status: string }> = [];
     for (let i = 0; i < numCount; i++) {
       inserts.push({
         code: generateCode(),
@@ -79,7 +79,7 @@ export async function POST(req: NextRequest) {
       .select();
 
     if (error) {
-      const results = [];
+      const results: any[] = [];
       for (const ins of inserts) {
         const { data: row } = await supabaseAdmin
           .from('deposit_codes')

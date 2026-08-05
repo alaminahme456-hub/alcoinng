@@ -80,7 +80,7 @@ export default function AdminTasks() {
   const fetchSubmissions = async (taskId: string) => {
     setSubmissionsLoading(true);
     try {
-      const data = await apiFetch(`/api/admin/tasks/${taskId}/submissions`);
+      const data = await apiFetch(`/api/admin/tasks?submissionsFor=${taskId}`);
       setSubmissions(Array.isArray(data) ? data : data.submissions || []);
     } catch {
       toast.error('Failed to fetch submissions');
@@ -130,7 +130,7 @@ export default function AdminTasks() {
   const handleSubmissionAction = async (submissionId: string, action: 'approve' | 'reject') => {
     try {
       const sub = submissions.find((s) => s.id === submissionId);
-      await apiFetch(`/api/admin/tasks/submissions/${submissionId}/${action}`, { method: 'POST' });
+      await apiFetch('/api/admin/tasks', { method: 'POST', body: JSON.stringify({ submissionId, action }) });
       toast.success(`Submission ${action}ed for ${sub?.userName || 'user'}`);
       if (expandedTask) fetchSubmissions(expandedTask);
       fetchTasks();

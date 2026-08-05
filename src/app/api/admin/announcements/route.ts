@@ -82,7 +82,7 @@ export async function PUT(req: NextRequest) {
     const admin = await requireAdmin(req);
     if (!isAuthUser(admin)) return admin;
 
-    const { announcementId } = await req.json();
+    const { announcementId, title, message, isActive, action } = await req.json();
     if (!announcementId) {
       return NextResponse.json({ error: 'Announcement ID is required' }, { status: 400 });
     }
@@ -97,8 +97,17 @@ export async function PUT(req: NextRequest) {
       return NextResponse.json({ error: 'Announcement not found' }, { status: 404 });
     }
 
-    const newActive = !existing.is_active;
-    await supabaseAdmin.from('announcements').update({ is_active: newActive }).eq('id', announcementId);
+    const updates: Record<string, unknown> = {};
+    if (action === 'toggle') updates.is_active = !existing.is_active;
+    if (title !== undefined) updates.title = title;
+    if (message !== undefined) updates.message = message;
+    if (isActive !== undefined) updates.is_active = Boolean(isActive);
+
+    if (Object.keys(updates).length === 0) {
+      return NextResponse.json({ error: 'No fields to update' }, { status: 400 });
+    }
+
+    await supabaseAdmin.from('announcements').update(updates).eq('id', announcementId);
 
     const { data } = await supabaseAdmin.from('announcements').select('*').eq('id', announcementId).single();
 
@@ -113,7 +122,7 @@ export async function PUT(req: NextRequest) {
 
     return NextResponse.json({
       announcement,
-      message: `Announcement ${data.is_active ? 'activated' : 'deactivated'}`,
+      message: action === 'toggle' ? `Announcement ${data.is_active ? 'activated' : 'deactivated'}` : 'Announcement updated',
     });
   } catch (error: unknown) {
     console.error('Toggle announcement error:', error);
