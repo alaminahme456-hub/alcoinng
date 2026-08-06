@@ -1,74 +1,58 @@
 'use client';
 
 import { useState } from 'react';
-import { motion } from 'framer-motion';
+import { motion, AnimatePresence } from 'framer-motion';
 import { useAppStore, apiFetch } from '@/store';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { ArrowLeft, User, Building2, Lock, Save, CheckCircle2, ShieldCheck, LogOut, Info } from 'lucide-react';
+import {
+  ArrowLeft, User, Save, CheckCircle2, ShieldCheck, LogOut,
+  Lock, MessageCircle, ChevronDown, ChevronUp, Info,
+} from 'lucide-react';
 import { useAuth } from '@clerk/nextjs';
 
 export default function ProfileView() {
   const { user, setUser, setView, logout } = useAppStore();
   const { signOut } = useAuth();
   const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
-  const [activeTab, setActiveTab] = useState('profile');
+  const [showResetInfo, setShowResetInfo] = useState(false);
 
-  // Profile fields
+  // Personal information fields
   const [fullName, setFullName] = useState(user?.fullName || '');
-  const [email, setEmail] = useState(user?.email || '');
   const [phone, setPhone] = useState(user?.phone || '');
-  const [profileLoading, setProfileLoading] = useState(false);
-  const [profileSuccess, setProfileSuccess] = useState(false);
-  const [profileError, setProfileError] = useState('');
-
-  // Bank fields
   const [bankName, setBankName] = useState(user?.bankName || '');
   const [bankAccount, setBankAccount] = useState(user?.bankAccount || '');
   const [bankAccountName, setBankAccountName] = useState(user?.bankAccountName || '');
-  const [bankLoading, setBankLoading] = useState(false);
-  const [bankSuccess, setBankSuccess] = useState(false);
-  const [bankError, setBankError] = useState('');
 
+  const [saving, setSaving] = useState(false);
+  const [success, setSuccess] = useState(false);
+  const [error, setError] = useState('');
 
-
-  const handleSaveProfile = async () => {
-    setProfileLoading(true);
-    setProfileError('');
-    setProfileSuccess(false);
+  const handleSave = async () => {
+    setSaving(true);
+    setError('');
+    setSuccess(false);
     try {
-      const data = await apiFetch('/api/user/profile', {
+      // Save personal info
+      const profileData = await apiFetch('/api/user/profile', {
         method: 'PUT',
-        body: JSON.stringify({ fullName, email, phone }),
+        body: JSON.stringify({ fullName, phone }),
       });
-      if (data.user) setUser(data.user);
-      setProfileSuccess(true);
-      setTimeout(() => setProfileSuccess(false), 3000);
-    } catch (err: any) {
-      setProfileError(err.message || 'Failed to update profile');
-    } finally {
-      setProfileLoading(false);
-    }
-  };
-
-  const handleSaveBank = async () => {
-    setBankLoading(true);
-    setBankError('');
-    setBankSuccess(false);
-    try {
-      const data = await apiFetch('/api/user/bank', {
+      // Save bank info
+      const bankData = await apiFetch('/api/user/bank', {
         method: 'PUT',
         body: JSON.stringify({ bankName, bankAccount, bankAccountName }),
       });
-      if (data.user) setUser(data.user);
-      setBankSuccess(true);
-      setTimeout(() => setBankSuccess(false), 3000);
+      // Update store with merged user data
+      if (profileData.user) setUser(profileData.user);
+      else if (bankData.user) setUser(bankData.user);
+      setSuccess(true);
+      setTimeout(() => setSuccess(false), 3000);
     } catch (err: any) {
-      setBankError(err.message || 'Failed to update bank details');
+      setError(err.message || 'Failed to update profile');
     } finally {
-      setBankLoading(false);
+      setSaving(false);
     }
   };
 
@@ -81,8 +65,14 @@ export default function ProfileView() {
     }
   };
 
+  // WhatsApp password reset link
+  const whatsappMessage = encodeURIComponent(
+    `Hello ALCOIN Admin, I would like to reset my password.\nMy registered email address is: ${user?.email || ''}.\nPlease assist me with resetting my password.`
+  );
+  const whatsappLink = `https://wa.me/2348000000000?text=${whatsappMessage}`;
+
   return (
-    <div className="min-h-screen">
+    <div className="min-h-screen pb-8">
       {/* Header */}
       <header className="sticky top-0 z-30 glass-strong px-4 py-3 flex items-center gap-3">
         <button
@@ -95,7 +85,7 @@ export default function ProfileView() {
       </header>
 
       <main className="px-4 pt-6 max-w-lg mx-auto space-y-6">
-        {/* User Avatar Section */}
+        {/* User Avatar Card */}
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
@@ -122,178 +112,216 @@ export default function ProfileView() {
           </p>
         </motion.div>
 
-        {/* Tabs */}
+        {/* ═══════ Personal Information ═══════ */}
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.05 }}
+          className="glass rounded-2xl p-6 space-y-4"
+        >
+          <div className="flex items-center gap-2 mb-1">
+            <User className="w-4 h-4 text-gold" />
+            <h2 className="font-semibold">Personal Information</h2>
+          </div>
+
+          {/* Full Name */}
+          <div className="space-y-2">
+            <Label htmlFor="profName" className="text-xs text-muted-foreground">Full Name</Label>
+            <Input
+              id="profName"
+              type="text"
+              value={fullName}
+              onChange={(e) => setFullName(e.target.value)}
+              className="bg-white/5 border-white/10 focus:border-gold h-11"
+            />
+          </div>
+
+          {/* Email — Read Only */}
+          <div className="space-y-2">
+            <Label htmlFor="profEmail" className="text-xs text-muted-foreground">Email Address</Label>
+            <Input
+              id="profEmail"
+              type="email"
+              value={user?.email || ''}
+              readOnly
+              className="bg-white/3 border-white/5 h-11 text-muted-foreground cursor-not-allowed"
+            />
+            <p className="text-[10px] text-muted-foreground/60">Email address cannot be changed</p>
+          </div>
+
+          {/* Phone Number */}
+          <div className="space-y-2">
+            <Label htmlFor="profPhone" className="text-xs text-muted-foreground">Phone Number</Label>
+            <Input
+              id="profPhone"
+              type="tel"
+              value={phone}
+              onChange={(e) => setPhone(e.target.value)}
+              className="bg-white/5 border-white/10 focus:border-gold h-11"
+            />
+          </div>
+
+          {/* Divider */}
+          <div className="border-t border-white/5 pt-1">
+            <p className="text-[11px] text-muted-foreground font-medium">Bank Details</p>
+          </div>
+
+          {/* Bank Name */}
+          <div className="space-y-2">
+            <Label htmlFor="bankName" className="text-xs text-muted-foreground">Bank Name</Label>
+            <Input
+              id="bankName"
+              type="text"
+              placeholder="e.g. Access Bank"
+              value={bankName}
+              onChange={(e) => setBankName(e.target.value)}
+              className="bg-white/5 border-white/10 focus:border-gold h-11"
+            />
+          </div>
+
+          {/* Bank Account Name */}
+          <div className="space-y-2">
+            <Label htmlFor="bankAcctName" className="text-xs text-muted-foreground">Bank Account Name</Label>
+            <Input
+              id="bankAcctName"
+              type="text"
+              placeholder="Enter account name"
+              value={bankAccountName}
+              onChange={(e) => setBankAccountName(e.target.value)}
+              className="bg-white/5 border-white/10 focus:border-gold h-11"
+            />
+          </div>
+
+          {/* Account Number */}
+          <div className="space-y-2">
+            <Label htmlFor="bankAcctNum" className="text-xs text-muted-foreground">Account Number</Label>
+            <Input
+              id="bankAcctNum"
+              type="text"
+              placeholder="Enter account number"
+              value={bankAccount}
+              onChange={(e) => setBankAccount(e.target.value)}
+              className="bg-white/5 border-white/10 focus:border-gold h-11"
+            />
+          </div>
+
+          {/* Success / Error messages */}
+          <AnimatePresence>
+            {success && (
+              <motion.div
+                initial={{ opacity: 0, y: -10 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -10 }}
+                className="flex items-center gap-2 text-sm text-emerald-400"
+              >
+                <CheckCircle2 className="w-4 h-4" /> Profile updated successfully
+              </motion.div>
+            )}
+          </AnimatePresence>
+          <AnimatePresence>
+            {error && (
+              <motion.div
+                initial={{ opacity: 0, y: -10 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -10 }}
+                className="p-3 rounded-lg bg-destructive/10 border border-destructive/20 text-destructive text-sm"
+              >
+                {error}
+              </motion.div>
+            )}
+          </AnimatePresence>
+
+          <Button
+            onClick={handleSave}
+            disabled={saving}
+            className="w-full gradient-gold text-gold-foreground font-semibold h-12"
+          >
+            {saving ? (
+              <motion.div animate={{ rotate: 360 }} transition={{ repeat: Infinity, duration: 1, ease: 'linear' }} className="w-5 h-5 border-2 border-gold-foreground/30 border-t-gold-foreground rounded-full" />
+            ) : (
+              <span className="flex items-center gap-2"><Save className="w-4 h-4" /> Save Changes</span>
+            )}
+          </Button>
+        </motion.div>
+
+        {/* ═══════ Reset Password ═══════ */}
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.1 }}
+          className="glass rounded-2xl p-6 space-y-4"
         >
-          <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-            <TabsList className="w-full grid grid-cols-3 glass h-12">
-              <TabsTrigger value="profile" className="text-xs gap-1.5 data-[state=active]:gradient-gold data-[state=active]:text-gold-foreground">
-                <User className="w-3.5 h-3.5" /> Profile
-              </TabsTrigger>
-              <TabsTrigger value="bank" className="text-xs gap-1.5 data-[state=active]:gradient-gold data-[state=active]:text-gold-foreground">
-                <Building2 className="w-3.5 h-3.5" /> Bank
-              </TabsTrigger>
-              <TabsTrigger value="security" className="text-xs gap-1.5 data-[state=active]:gradient-gold data-[state=active]:text-gold-foreground">
-                <Lock className="w-3.5 h-3.5" /> Security
-              </TabsTrigger>
-            </TabsList>
+          <div className="flex items-center gap-2 mb-1">
+            <Lock className="w-4 h-4 text-gold" />
+            <h2 className="font-semibold">Reset Password</h2>
+          </div>
 
-            {/* Profile Tab */}
-            <TabsContent value="profile" className="mt-4 space-y-4">
-              <div className="glass rounded-2xl p-6 space-y-4">
-                <div className="space-y-2">
-                  <Label htmlFor="profName" className="text-sm text-muted-foreground">Full Name</Label>
-                  <Input
-                    id="profName"
-                    type="text"
-                    value={fullName}
-                    onChange={(e) => setFullName(e.target.value)}
-                    className="bg-white/5 border-white/10 focus:border-gold h-12"
-                  />
+          {!showResetInfo ? (
+            <Button
+              onClick={() => setShowResetInfo(true)}
+              className="w-full h-11 glass border border-white/10 hover:bg-white/10 font-semibold rounded-xl"
+            >
+              <span className="flex items-center gap-2">
+                <Lock className="w-4 h-4" /> Reset Password
+              </span>
+            </Button>
+          ) : (
+            <motion.div
+              initial={{ opacity: 0, height: 0 }}
+              animate={{ opacity: 1, height: 'auto' }}
+              className="space-y-4"
+            >
+              {/* Info box */}
+              <div className="rounded-xl bg-gold/5 border border-gold/10 p-4 space-y-3">
+                <div className="flex items-start gap-2.5">
+                  <Info className="w-4 h-4 text-gold mt-0.5 shrink-0" />
+                  <p className="text-sm text-muted-foreground leading-relaxed">
+                    Password reset requests are handled by the ALCOIN administrator for security purposes. Tap the button below to request a reset, and the admin will verify your identity and assist you.
+                  </p>
                 </div>
-                <div className="space-y-2">
-                  <Label htmlFor="profEmail" className="text-sm text-muted-foreground">Email</Label>
-                  <Input
-                    id="profEmail"
-                    type="email"
-                    value={email}
-                    onChange={(e) => setEmail(e.target.value)}
-                    className="bg-white/5 border-white/10 focus:border-gold h-12"
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="profPhone" className="text-sm text-muted-foreground">Phone Number</Label>
-                  <Input
-                    id="profPhone"
-                    type="tel"
-                    value={phone}
-                    onChange={(e) => setPhone(e.target.value)}
-                    className="bg-white/5 border-white/10 focus:border-gold h-12"
-                  />
-                </div>
+              </div>
 
-                {profileSuccess && (
-                  <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} className="flex items-center gap-2 text-sm text-emerald-400">
-                    <CheckCircle2 className="w-4 h-4" /> Profile updated successfully
-                  </motion.div>
-                )}
-                {profileError && (
-                  <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} className="p-3 rounded-lg bg-destructive/10 border border-destructive/20 text-destructive text-sm">
-                    {profileError}
-                  </motion.div>
-                )}
+              {/* Request Password Reset button */}
+              <Button
+                onClick={() => setShowResetInfo(false)}
+                className="w-full h-11 glass border border-gold/20 hover:bg-gold/10 text-gold font-semibold rounded-xl"
+              >
+                <span className="flex items-center gap-2">
+                  <Lock className="w-4 h-4" /> Request Password Reset
+                </span>
+              </Button>
 
+              {/* Divider */}
+              <div className="flex items-center gap-3">
+                <div className="flex-1 border-t border-white/5" />
+                <span className="text-[10px] text-muted-foreground">or</span>
+                <div className="flex-1 border-t border-white/5" />
+              </div>
+
+              {/* Contact Admin on WhatsApp */}
+              <a
+                href={whatsappLink}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="block"
+              >
                 <Button
-                  onClick={handleSaveProfile}
-                  disabled={profileLoading}
-                  className="w-full gradient-gold text-gold-foreground font-semibold h-12"
+                  className="w-full h-11 bg-emerald-500/15 border border-emerald-500/30 hover:bg-emerald-500/25 text-emerald-400 font-semibold rounded-xl"
                 >
-                  {profileLoading ? (
-                    <motion.div animate={{ rotate: 360 }} transition={{ repeat: Infinity, duration: 1, ease: 'linear' }} className="w-5 h-5 border-2 border-gold-foreground/30 border-t-gold-foreground rounded-full" />
-                  ) : (
-                    <span className="flex items-center gap-2"><Save className="w-4 h-4" /> Save Changes</span>
-                  )}
+                  <span className="flex items-center gap-2">
+                    <MessageCircle className="w-4 h-4" /> Contact Admin on WhatsApp
+                  </span>
                 </Button>
-              </div>
-            </TabsContent>
-
-            {/* Bank Tab */}
-            <TabsContent value="bank" className="mt-4 space-y-4">
-              <div className="glass rounded-2xl p-6 space-y-4">
-                <div className="space-y-2">
-                  <Label htmlFor="bankName" className="text-sm text-muted-foreground">Bank Name</Label>
-                  <Input
-                    id="bankName"
-                    type="text"
-                    placeholder="e.g. Access Bank"
-                    value={bankName}
-                    onChange={(e) => setBankName(e.target.value)}
-                    className="bg-white/5 border-white/10 focus:border-gold h-12"
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="bankAcctNum" className="text-sm text-muted-foreground">Account Number</Label>
-                  <Input
-                    id="bankAcctNum"
-                    type="text"
-                    placeholder="Enter account number"
-                    value={bankAccount}
-                    onChange={(e) => setBankAccount(e.target.value)}
-                    className="bg-white/5 border-white/10 focus:border-gold h-12"
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="bankAcctName" className="text-sm text-muted-foreground">Account Name</Label>
-                  <Input
-                    id="bankAcctName"
-                    type="text"
-                    placeholder="Enter account name"
-                    value={bankAccountName}
-                    onChange={(e) => setBankAccountName(e.target.value)}
-                    className="bg-white/5 border-white/10 focus:border-gold h-12"
-                  />
-                </div>
-
-                {bankSuccess && (
-                  <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} className="flex items-center gap-2 text-sm text-emerald-400">
-                    <CheckCircle2 className="w-4 h-4" /> Bank details updated successfully
-                  </motion.div>
-                )}
-                {bankError && (
-                  <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} className="p-3 rounded-lg bg-destructive/10 border border-destructive/20 text-destructive text-sm">
-                    {bankError}
-                  </motion.div>
-                )}
-
-                <Button
-                  onClick={handleSaveBank}
-                  disabled={bankLoading}
-                  className="w-full gradient-gold text-gold-foreground font-semibold h-12"
-                >
-                  {bankLoading ? (
-                    <motion.div animate={{ rotate: 360 }} transition={{ repeat: Infinity, duration: 1, ease: 'linear' }} className="w-5 h-5 border-2 border-gold-foreground/30 border-t-gold-foreground rounded-full" />
-                  ) : (
-                    <span className="flex items-center gap-2"><Save className="w-4 h-4" /> Save Bank Details</span>
-                  )}
-                </Button>
-              </div>
-
-              <div className="glass rounded-2xl p-4 border-alcoin-blue/20">
-                <p className="text-xs text-muted-foreground">
-                  Your bank details are required for withdrawals. Please ensure they are accurate to avoid payment issues.
-                </p>
-              </div>
-            </TabsContent>
-
-            {/* Password Tab */}
-            <TabsContent value="security" className="mt-4 space-y-4">
-              <div className="glass rounded-2xl p-6 space-y-4">
-                <div className="flex items-center gap-3 mb-2">
-                  <div className="w-10 h-10 rounded-xl bg-alcoin-blue/10 flex items-center justify-center">
-                    <Info className="w-5 h-5 text-alcoin-blue" />
-                  </div>
-                  <div>
-                    <h3 className="font-semibold text-sm">Password & Security</h3>
-                    <p className="text-xs text-muted-foreground">Managed by our secure auth provider</p>
-                  </div>
-                </div>
-                <p className="text-sm text-muted-foreground">
-                  Your account password and security settings are managed securely through our authentication provider. You can change your password directly from the sign-in page by clicking &quot;Forgot password&quot;.
-                </p>
-              </div>
-            </TabsContent>
-          </Tabs>
+              </a>
+            </motion.div>
+          )}
         </motion.div>
 
         {/* Logout Button */}
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.2 }}
-          className="pb-8"
+          transition={{ delay: 0.15 }}
         >
           <Button
             onClick={() => setShowLogoutConfirm(true)}
@@ -302,8 +330,10 @@ export default function ProfileView() {
             <span className="flex items-center gap-2"><LogOut className="w-4 h-4" /> Log Out</span>
           </Button>
         </motion.div>
+      </main>
 
-        {/* Logout Confirmation Dialog */}
+      {/* Logout Confirmation Dialog */}
+      <AnimatePresence>
         {showLogoutConfirm && (
           <motion.div
             initial={{ opacity: 0 }}
@@ -315,6 +345,7 @@ export default function ProfileView() {
             <motion.div
               initial={{ opacity: 0, scale: 0.95, y: 20 }}
               animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 20 }}
               className="glass rounded-2xl p-6 max-w-sm w-full space-y-4"
               onClick={(e) => e.stopPropagation()}
             >
@@ -342,7 +373,7 @@ export default function ProfileView() {
             </motion.div>
           </motion.div>
         )}
-      </main>
+      </AnimatePresence>
     </div>
   );
 }
