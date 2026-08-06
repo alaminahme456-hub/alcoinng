@@ -29,14 +29,13 @@ import {
   Trophy, XCircle, CheckCircle2, Clock, History, Filter,
 } from 'lucide-react';
 import {
-  LineChart,
-  Line,
   XAxis,
   YAxis,
   CartesianGrid,
   Tooltip,
   ResponsiveContainer,
-  ReferenceLine,
+  Area,
+  AreaChart,
 } from 'recharts';
 
 function formatNaira(amount: number) {
@@ -89,12 +88,21 @@ const HISTORY_FILTERS = [
 export default function MarketView() {
   const { wallets, setWallets, setView } = useAppStore();
 
-  // Chart data
+  // Chart data — client-side AI price simulation
   const [priceData, setPriceData] = useState<PricePoint[]>([]);
   const [currentPrice, setCurrentPrice] = useState<number | null>(null);
   const [prevPrice, setPrevPrice] = useState<number | null>(null);
   const [chartLoading, setChartLoading] = useState(true);
   const priceIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  // AI price simulation state
+  const priceSimRef = useRef({
+    price: 75 + Math.random() * 25,
+    momentum: 0,
+    volatility: 0.5,
+    trend: 0,
+    tickCount: 0,
+  });
 
   // Trade form
   const [selectedWallet, setSelectedWallet] = useState<WalletType>('deposit');
@@ -112,26 +120,62 @@ export default function MarketView() {
   const [historyLoading, setHistoryLoading] = useState(true);
   const [historyFilter, setHistoryFilter] = useState('all');
 
-  const fetchPrice = useCallback(async () => {
-    try {
-      const data = await apiFetch('/api/market/price');
-      if (data.price !== undefined) {
-        setPrevPrice(currentPrice);
-        setCurrentPrice(data.price);
-        if (data.history && Array.isArray(data.history)) {
-          setPriceData(data.history.slice(-60));
-        } else if (data.time) {
-          setPriceData((prev) => {
-            const next = [...prev, { time: data.time, price: data.price, timestamp: Date.now() }];
-            return next.slice(-60);
-          });
-        }
-      }
-      setChartLoading(false);
-    } catch {
-      if (chartLoading) setChartLoading(false);
+  // Generate AI-driven price tick with momentum, trend, mean-reversion & volatility clustering
+  const generatePriceTick = useCallback(() => {
+    const sim = priceSimRef.current;
+    sim.tickCount++;
+
+    // Shift trend slowly every ~20 ticks
+    if (sim.tickCount % 20 === 0) {
+      sim.trend = (Math.random() - 0.5) * 0.6;
     }
-  }, [currentPrice, chartLoading]);
+
+    // GARCH-like volatility clustering
+    const volTarget = 0.4 + Math.random() * 0.8;
+    sim.volatility = 0.85 * sim.volatility + 0.15 * volTarget;
+
+    // Mean-reversion pull toward 75-85 range
+    const meanTarget = 80;
+    const meanPull = (meanTarget - sim.price) * 0.002;
+
+    // Random shock + momentum + trend + mean reversion
+    const shock = (Math.random() - 0.5) * 2 * sim.volatility;
+    sim.momentum = 0.7 * sim.momentum + 0.3 * (shock + sim.trend);
+
+    const delta = sim.momentum + meanPull;
+    sim.price = Math.max(10, Math.min(200, sim.price + delta));
+
+    return Math.round(sim.price * 100) / 100;
+  }, []);
+
+  // Initialize chart with 60 historical points, then tick every 1.5s
+  const initChart = useCallback(() => {
+    const sim = priceSimRef.current;
+    const points: PricePoint[] = [];
+    const now = Date.now();
+    for (let i = 59; i >= 0; i--) {
+      // Generate a tick for each historical point
+      const vol = 0.3 + Math.random() * 0.5;
+      const change = (Math.random() - 0.48) * vol * 2;
+      sim.momentum = 0.6 * sim.momentum + 0.4 * change;
+      sim.price = Math.max(10, Math.min(200, sim.price + sim.momentum));
+      const price = Math.round(sim.price * 100) / 100;
+      points.push({
+        time: new Date(now - i * 2000).toLocaleTimeString('en-US', {
+          hour12: false,
+          hour: '2-digit',
+          minute: '2-digit',
+          second: '2-digit',
+        }),
+        price,
+        timestamp: now - i * 2000,
+      });
+    }
+    setPriceData(points);
+    setCurrentPrice(points[points.length - 1].price);
+    setPrevPrice(points[points.length - 2].price);
+    setChartLoading(false);
+  }, []);
 
   const fetchHistory = useCallback(async () => {
     try {
@@ -157,19 +201,33 @@ export default function MarketView() {
     }
   }, [setWallets]);
 
-  // Initial fetch
+  // Initialize chart with historical data
   useEffect(() => {
-    fetchPrice();
+    initChart();
     fetchHistory();
-  }, [fetchPrice, fetchHistory]);
+  }, [initChart, fetchHistory]);
 
-  // Poll price every 2s
+  // Tick new price every 1.5 seconds
   useEffect(() => {
-    priceIntervalRef.current = setInterval(fetchPrice, 2000);
+    priceIntervalRef.current = setInterval(() => {
+      const newPrice = generatePriceTick();
+      const timeStr = new Date().toLocaleTimeString('en-US', {
+        hour12: false,
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+      });
+      setPrevPrice(currentPrice);
+      setCurrentPrice(newPrice);
+      setPriceData((prev) => {
+        const next = [...prev, { time: timeStr, price: newPrice, timestamp: Date.now() }];
+        return next.slice(-60);
+      });
+    }, 1500);
     return () => {
       if (priceIntervalRef.current) clearInterval(priceIntervalRef.current);
     };
-  }, [fetchPrice]);
+  }, [generatePriceTick, currentPrice]);
 
   // Trade countdown
   const countdownRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -325,7 +383,17 @@ export default function MarketView() {
           ) : (
             <div className="h-48 sm:h-56">
               <ResponsiveContainer width="100%" height="100%">
-                <LineChart data={priceData} margin={{ top: 5, right: 5, left: -20, bottom: 0 }}>
+                <AreaChart data={priceData} margin={{ top: 5, right: 5, left: -20, bottom: 0 }}>
+                  <defs>
+                    <linearGradient id="priceGradientUp" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="0%" stopColor="#34d399" stopOpacity={0.25} />
+                      <stop offset="100%" stopColor="#34d399" stopOpacity={0} />
+                    </linearGradient>
+                    <linearGradient id="priceGradientDown" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="0%" stopColor="#f87171" stopOpacity={0.25} />
+                      <stop offset="100%" stopColor="#f87171" stopOpacity={0} />
+                    </linearGradient>
+                  </defs>
                   <CartesianGrid
                     strokeDasharray="3 3"
                     stroke="rgba(212, 175, 55, 0.08)"
@@ -346,15 +414,16 @@ export default function MarketView() {
                     tickFormatter={(v: number) => `\u20a6${v.toFixed(0)}`}
                   />
                   <Tooltip content={<CustomTooltip />} />
-                  <Line
+                  <Area
                     type="monotone"
                     dataKey="price"
-                    stroke="#d4af37"
+                    stroke={priceUp ? '#34d399' : priceChange !== 0 ? '#f87171' : '#d4af37'}
                     strokeWidth={2}
+                    fill={priceUp ? 'url(#priceGradientUp)' : priceChange !== 0 ? 'url(#priceGradientDown)' : 'none'}
                     dot={false}
                     isAnimationActive={false}
                   />
-                </LineChart>
+                </AreaChart>
               </ResponsiveContainer>
             </div>
           )}
@@ -442,36 +511,36 @@ export default function MarketView() {
               <motion.button
                 whileTap={{ scale: 0.97 }}
                 onClick={() => setPrediction(prediction === 'UP' ? null : 'UP')}
-                className={`rounded-xl p-4 flex flex-col items-center gap-2 transition-all border-2 min-h-[80px] ${
+                className={`rounded-lg p-2.5 flex items-center gap-2 transition-all border-2 ${
                   prediction === 'UP'
                     ? 'bg-emerald-500/15 border-emerald-500/50'
                     : 'glass border-transparent hover:border-emerald-500/20'
                 }`}
               >
-                <ArrowUpCircle className={`w-8 h-8 ${prediction === 'UP' ? 'text-emerald-400' : 'text-muted-foreground'}`} />
-                <span className={`text-sm font-bold ${prediction === 'UP' ? 'text-emerald-400' : 'text-muted-foreground'}`}>
+                <ArrowUpCircle className={`w-5 h-5 ${prediction === 'UP' ? 'text-emerald-400' : 'text-muted-foreground'}`} />
+                <span className={`text-xs font-bold ${prediction === 'UP' ? 'text-emerald-400' : 'text-muted-foreground'}`}>
                   Buy
                 </span>
                 <span className={`text-[10px] ${prediction === 'UP' ? 'text-emerald-400/70' : 'text-muted-foreground/60'}`}>
-                  Chart goes UP
+                  UP
                 </span>
               </motion.button>
 
               <motion.button
                 whileTap={{ scale: 0.97 }}
                 onClick={() => setPrediction(prediction === 'DOWN' ? null : 'DOWN')}
-                className={`rounded-xl p-4 flex flex-col items-center gap-2 transition-all border-2 min-h-[80px] ${
+                className={`rounded-lg p-2.5 flex items-center gap-2 transition-all border-2 ${
                   prediction === 'DOWN'
                     ? 'bg-red-500/15 border-red-500/50'
                     : 'glass border-transparent hover:border-red-500/20'
                 }`}
               >
-                <ArrowDownCircle className={`w-8 h-8 ${prediction === 'DOWN' ? 'text-red-400' : 'text-muted-foreground'}`} />
-                <span className={`text-sm font-bold ${prediction === 'DOWN' ? 'text-red-400' : 'text-muted-foreground'}`}>
+                <ArrowDownCircle className={`w-5 h-5 ${prediction === 'DOWN' ? 'text-red-400' : 'text-muted-foreground'}`} />
+                <span className={`text-xs font-bold ${prediction === 'DOWN' ? 'text-red-400' : 'text-muted-foreground'}`}>
                   Sell
                 </span>
                 <span className={`text-[10px] ${prediction === 'DOWN' ? 'text-red-400/70' : 'text-muted-foreground/60'}`}>
-                  Chart goes DOWN
+                  DOWN
                 </span>
               </motion.button>
             </div>
