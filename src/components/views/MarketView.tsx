@@ -25,7 +25,7 @@ import {
 import { toast } from 'sonner';
 import {
   ArrowLeft, TrendingUp, Wallet, PiggyBank, TrendingUpIcon,
-  ArrowUpCircle, ArrowDownCircle, Loader2, AlertCircle,
+  ArrowUpCircle, ArrowDownCircle, Loader2,
   Trophy, XCircle, CheckCircle2, Clock, History, Filter,
 } from 'lucide-react';
 import {
@@ -66,26 +66,18 @@ type WalletType = 'reward' | 'deposit' | 'profit';
 type Prediction = 'UP' | 'DOWN' | null;
 
 const DURATION_OPTIONS = [
-  { label: '10s', value: 10 },
-  { label: '30s', value: 30 },
-  { label: '1min', value: 60 },
-  { label: '2min', value: 120 },
-  { label: '5min', value: 300 },
-  { label: '10min', value: 600 },
-];
-
-const MULTIPLIER_OPTIONS = [
-  { label: '1.10x', value: 1.10 },
-  { label: '1.20x', value: 1.20 },
-  { label: '1.30x', value: 1.30 },
-  { label: '1.40x', value: 1.40 },
-  { label: '1.50x', value: 1.50 },
+  { label: '10 Seconds', value: 10 },
+  { label: '30 Seconds', value: 30 },
+  { label: '1 Minute', value: 60 },
+  { label: '2 Minutes', value: 120 },
+  { label: '5 Minutes', value: 300 },
+  { label: '10 Minutes', value: 600 },
 ];
 
 const WALLET_CONFIG: Record<WalletType, { label: string; icon: typeof Wallet; color: string; balanceKey: 'reward' | 'deposit' | 'profit' }> = {
-  reward: { label: 'Reward', icon: Wallet, color: 'text-gold', balanceKey: 'reward' },
-  deposit: { label: 'Deposit', icon: PiggyBank, color: 'text-alcoin-blue', balanceKey: 'deposit' },
-  profit: { label: 'Profit', icon: TrendingUpIcon, color: 'text-emerald-400', balanceKey: 'profit' },
+  reward: { label: 'Reward Wallet', icon: Wallet, color: 'text-gold', balanceKey: 'reward' },
+  deposit: { label: 'Deposit Wallet', icon: PiggyBank, color: 'text-alcoin-blue', balanceKey: 'deposit' },
+  profit: { label: 'Profit Wallet', icon: TrendingUpIcon, color: 'text-emerald-400', balanceKey: 'profit' },
 };
 
 const HISTORY_FILTERS = [
@@ -109,12 +101,11 @@ export default function MarketView() {
   const [prediction, setPrediction] = useState<Prediction>(null);
   const [tradeAmount, setTradeAmount] = useState('');
   const [duration, setDuration] = useState<number>(30);
-  const [multiplier, setMultiplier] = useState<number>(1.20);
 
   // Trade execution
   const [trading, setTrading] = useState(false);
   const [tradeCountdown, setTradeCountdown] = useState<number | null>(null);
-  const [tradeResult, setTradeResult] = useState<{ win: boolean; profit: number; message: string } | null>(null);
+  const [tradeResult, setTradeResult] = useState<{ win: boolean; profit: number; totalReturn: number; message: string; multiplier: number } | null>(null);
 
   // History
   const [history, setHistory] = useState<TradeHistoryItem[]>([]);
@@ -203,9 +194,6 @@ export default function MarketView() {
 
   const availableBalance = wallets[WALLET_CONFIG[selectedWallet].balanceKey];
   const amountNum = parseFloat(tradeAmount) || 0;
-  const estimatedProfit = prediction && amountNum > 0
-    ? amountNum * multiplier - amountNum
-    : 0;
 
   const formatCountdown = (seconds: number) => {
     const m = Math.floor(seconds / 60);
@@ -218,7 +206,7 @@ export default function MarketView() {
     if (!prediction || amountNum <= 0) return;
     if (amountNum > availableBalance) {
       toast.error('Insufficient balance', {
-        description: `Your ${WALLET_CONFIG[selectedWallet].label} wallet has ${formatNaira(availableBalance)}`,
+        description: `Your ${WALLET_CONFIG[selectedWallet].label} has ${formatNaira(availableBalance)}`,
       });
       return;
     }
@@ -232,10 +220,9 @@ export default function MarketView() {
         method: 'POST',
         body: JSON.stringify({
           wallet: selectedWallet,
-          prediction,
+          prediction: prediction === 'UP' ? 'buy' : 'sell',
           amount: amountNum,
           duration,
-          multiplier,
         }),
       });
 
@@ -244,19 +231,24 @@ export default function MarketView() {
       // Small delay for dramatic effect
       await new Promise((r) => setTimeout(r, 400));
 
+      const isWin = data.trade?.result === 'win';
+      const multiplierUsed = data.trade?.payout_multiplier || 1.0;
+      const totalReturn = isWin ? amountNum * multiplierUsed : 0;
+      const profit = isWin ? totalReturn - amountNum : 0;
+
       setTradeResult({
-        win: data.result === 'win',
-        profit: data.profit || 0,
-        message: data.message || (data.result === 'win' ? 'Trade successful!' : 'Better luck next time.'),
+        win: isWin,
+        profit,
+        totalReturn,
+        multiplier: multiplierUsed,
+        message: data.message || (isWin ? 'Trade successful!' : 'Better luck next time.'),
       });
 
       toast.success(
-        data.result === 'win'
-          ? `Trade Won! +${formatNaira(data.profit || 0)}`
+        isWin
+          ? `Trade Won! +${formatNaira(profit)}`
           : `Trade Lost`,
-        {
-          description: data.message || '',
-        }
+        { description: data.message || '' }
       );
 
       refreshWallets();
@@ -349,24 +341,18 @@ export default function MarketView() {
                   <YAxis
                     domain={['auto', 'auto']}
                     tick={{ fontSize: 10, fill: '#8888a0' }}
-                    axisLine={false}
+                    axisLine={{ stroke: 'rgba(255,255,255,0.06)' }}
                     tickLine={false}
-                    width={50}
-                    tickFormatter={(v) => `₦${v.toLocaleString()}`}
+                    tickFormatter={(v: number) => `\u20a6${v.toFixed(0)}`}
                   />
                   <Tooltip content={<CustomTooltip />} />
                   <Line
                     type="monotone"
                     dataKey="price"
-                    stroke={priceUp ? '#10b981' : '#ef4444'}
+                    stroke="#d4af37"
                     strokeWidth={2}
                     dot={false}
-                    activeDot={{ r: 4, fill: priceUp ? '#10b981' : '#ef4444', strokeWidth: 0 }}
-                  />
-                  <ReferenceLine
-                    y={priceData.length > 0 ? priceData[priceData.length - 1]?.price : undefined}
-                    stroke="rgba(212, 175, 55, 0.2)"
-                    strokeDasharray="3 3"
+                    isAnimationActive={false}
                   />
                 </LineChart>
               </ResponsiveContainer>
@@ -374,7 +360,7 @@ export default function MarketView() {
           )}
         </motion.div>
 
-        {/* Current Price */}
+        {/* Current Price Display */}
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
@@ -397,94 +383,106 @@ export default function MarketView() {
           </AnimatePresence>
           {priceChange !== 0 && (
             <p className={`text-xs mt-1 font-medium ${priceUp ? 'text-emerald-400' : 'text-red-400'}`}>
-              {priceUp ? '▲' : '▼'} {priceUp ? '+' : ''}{formatNaira(Math.abs(priceChange))}
+              {priceUp ? '\u25b2' : '\u25bc'} {priceUp ? '+' : ''}{formatNaira(Math.abs(priceChange))}
             </p>
           )}
         </motion.div>
 
-        {/* Trade Form */}
+        {/* ═══════ Place Trade Panel ═══════ */}
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.1 }}
-          className="glass rounded-xl p-4 space-y-4"
+          className="glass rounded-xl p-4 space-y-5"
         >
           <h2 className="font-semibold text-sm">Place Trade</h2>
 
-          {/* Wallet Selector */}
+          {/* 1. Select Wallet — Dropdown */}
           <div className="space-y-2">
             <p className="text-xs text-muted-foreground">Select Wallet</p>
-            <div className="grid grid-cols-3 gap-2">
-              {(Object.keys(WALLET_CONFIG) as WalletType[]).map((key) => {
-                const cfg = WALLET_CONFIG[key];
-                const isSelected = selectedWallet === key;
-                const bal = wallets[cfg.balanceKey];
-
-                return (
-                  <button
-                    key={key}
-                    onClick={() => setSelectedWallet(key)}
-                    className={`rounded-xl p-3 text-center transition-all border ${
-                      isSelected
-                        ? 'glass-strong border-gold/40 gold-glow'
-                        : 'glass border-transparent hover:border-white/10'
-                    }`}
-                  >
-                    <cfg.icon className={`w-4 h-4 mx-auto mb-1 ${cfg.color}`} />
-                    <p className={`text-xs font-medium ${isSelected ? cfg.color : 'text-muted-foreground'}`}>
-                      {cfg.label}
-                    </p>
-                    <p className={`text-xs font-bold mt-0.5 ${isSelected ? cfg.color : 'text-foreground'}`}>
-                      {formatNaira(bal)}
-                    </p>
-                  </button>
-                );
-              })}
-            </div>
+            <Select
+              value={selectedWallet}
+              onValueChange={(v) => setSelectedWallet(v as WalletType)}
+            >
+              <SelectTrigger className="w-full bg-white/5 border-white/10 focus:border-gold h-11">
+                <div className="flex items-center gap-2">
+                  {(() => {
+                    const cfg = WALLET_CONFIG[selectedWallet];
+                    return <>
+                      <cfg.icon className={`w-4 h-4 ${cfg.color}`} />
+                      <SelectValue />
+                    </>;
+                  })()}
+                </div>
+              </SelectTrigger>
+              <SelectContent className="glass-strong border-white/10">
+                {(Object.keys(WALLET_CONFIG) as WalletType[]).map((key) => {
+                  const cfg = WALLET_CONFIG[key];
+                  return (
+                    <SelectItem key={key} value={key}>
+                      <div className="flex items-center gap-2">
+                        <cfg.icon className={`w-4 h-4 ${cfg.color}`} />
+                        <span>{cfg.label}</span>
+                        <span className="text-muted-foreground ml-auto">({formatNaira(wallets[cfg.balanceKey])})</span>
+                      </div>
+                    </SelectItem>
+                  );
+                })}
+              </SelectContent>
+            </Select>
+            <p className="text-[11px] text-muted-foreground">
+              Balance: <span className="text-foreground font-medium">{formatNaira(availableBalance)}</span>
+            </p>
           </div>
 
-          {/* Prediction */}
+          {/* 2. Prediction — Buy / Sell */}
           <div className="space-y-2">
             <p className="text-xs text-muted-foreground">Prediction</p>
             <div className="grid grid-cols-2 gap-3">
               <motion.button
                 whileTap={{ scale: 0.97 }}
                 onClick={() => setPrediction(prediction === 'UP' ? null : 'UP')}
-                className={`rounded-xl p-4 flex flex-col items-center gap-2 transition-all border-2 min-h-[72px] ${
+                className={`rounded-xl p-4 flex flex-col items-center gap-2 transition-all border-2 min-h-[80px] ${
                   prediction === 'UP'
                     ? 'bg-emerald-500/15 border-emerald-500/50'
                     : 'glass border-transparent hover:border-emerald-500/20'
                 }`}
               >
-                <ArrowUpCircle className={`w-7 h-7 ${prediction === 'UP' ? 'text-emerald-400' : 'text-muted-foreground'}`} />
+                <ArrowUpCircle className={`w-8 h-8 ${prediction === 'UP' ? 'text-emerald-400' : 'text-muted-foreground'}`} />
                 <span className={`text-sm font-bold ${prediction === 'UP' ? 'text-emerald-400' : 'text-muted-foreground'}`}>
-                  BUY (UP)
+                  Buy
+                </span>
+                <span className={`text-[10px] ${prediction === 'UP' ? 'text-emerald-400/70' : 'text-muted-foreground/60'}`}>
+                  Chart goes UP
                 </span>
               </motion.button>
 
               <motion.button
                 whileTap={{ scale: 0.97 }}
                 onClick={() => setPrediction(prediction === 'DOWN' ? null : 'DOWN')}
-                className={`rounded-xl p-4 flex flex-col items-center gap-2 transition-all border-2 min-h-[72px] ${
+                className={`rounded-xl p-4 flex flex-col items-center gap-2 transition-all border-2 min-h-[80px] ${
                   prediction === 'DOWN'
                     ? 'bg-red-500/15 border-red-500/50'
                     : 'glass border-transparent hover:border-red-500/20'
                 }`}
               >
-                <ArrowDownCircle className={`w-7 h-7 ${prediction === 'DOWN' ? 'text-red-400' : 'text-muted-foreground'}`} />
+                <ArrowDownCircle className={`w-8 h-8 ${prediction === 'DOWN' ? 'text-red-400' : 'text-muted-foreground'}`} />
                 <span className={`text-sm font-bold ${prediction === 'DOWN' ? 'text-red-400' : 'text-muted-foreground'}`}>
-                  SELL (DOWN)
+                  Sell
+                </span>
+                <span className={`text-[10px] ${prediction === 'DOWN' ? 'text-red-400/70' : 'text-muted-foreground/60'}`}>
+                  Chart goes DOWN
                 </span>
               </motion.button>
             </div>
           </div>
 
-          {/* Investment Amount */}
+          {/* 3. Investment Amount */}
           <div className="space-y-2">
-            <p className="text-xs text-muted-foreground">Investment Amount</p>
+            <p className="text-xs text-muted-foreground">Investment</p>
             <div className="relative">
               <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-muted-foreground font-medium">
-                ₦
+                \u20a6
               </span>
               <Input
                 type="number"
@@ -504,97 +502,39 @@ export default function MarketView() {
                 MAX
               </button>
             </div>
-            {/* Quick amounts */}
-            <div className="flex gap-2">
-              {[100, 500, 1000, 2000, 5000].map((amt) => (
-                <button
-                  key={amt}
-                  onClick={() => setTradeAmount(amt.toString())}
-                  className="flex-1 glass rounded-lg py-1.5 text-[10px] font-medium text-muted-foreground hover:text-foreground hover:bg-white/8 transition-colors"
-                >
-                  {amt >= 1000 ? `${amt / 1000}K` : amt}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          {/* Duration & Multiplier Row */}
-          <div className="grid grid-cols-2 gap-3">
-            <div className="space-y-2">
-              <p className="text-xs text-muted-foreground">Duration</p>
-              <Select
-                value={duration.toString()}
-                onValueChange={(v) => setDuration(parseInt(v))}
-              >
-                <SelectTrigger className="w-full bg-white/5 border-white/10 focus:border-gold h-11">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent className="glass-strong border-white/10">
-                  {DURATION_OPTIONS.map((opt) => (
-                    <SelectItem key={opt.value} value={opt.value.toString()}>
-                      {opt.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-
-            <div className="space-y-2">
-              <p className="text-xs text-muted-foreground">Multiplier</p>
-              <Select
-                value={multiplier.toString()}
-                onValueChange={(v) => setMultiplier(parseFloat(v))}
-              >
-                <SelectTrigger className="w-full bg-white/5 border-white/10 focus:border-gold h-11">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent className="glass-strong border-white/10">
-                  {MULTIPLIER_OPTIONS.map((opt) => (
-                    <SelectItem key={opt.value} value={opt.value.toString()}>
-                      {opt.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-          </div>
-
-          {/* Trade Summary */}
-          {prediction && amountNum > 0 && (
-            <motion.div
-              initial={{ opacity: 0, height: 0 }}
-              animate={{ opacity: 1, height: 'auto' }}
-              className="glass-strong rounded-lg p-3 space-y-2"
-            >
-              <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
-                Trade Summary
+            {amountNum > availableBalance && amountNum > 0 && (
+              <p className="text-[11px] text-red-400">
+                Amount exceeds your {WALLET_CONFIG[selectedWallet].label} balance of {formatNaira(availableBalance)}
               </p>
-              <div className="grid grid-cols-2 gap-1 text-sm">
-                <span className="text-muted-foreground">Prediction</span>
-                <span className={`font-medium text-right ${prediction === 'UP' ? 'text-emerald-400' : 'text-red-400'}`}>
-                  {prediction === 'UP' ? 'BUY (UP)' : 'SELL (DOWN)'}
-                </span>
-                <span className="text-muted-foreground">Investment</span>
-                <span className="font-medium text-right">{formatNaira(amountNum)}</span>
-                <span className="text-muted-foreground">Multiplier</span>
-                <span className="font-medium text-right">{multiplier.toFixed(2)}x</span>
-                <span className="text-muted-foreground">Duration</span>
-                <span className="font-medium text-right">
-                  {DURATION_OPTIONS.find((d) => d.value === duration)?.label || `${duration}s`}
-                </span>
-                <span className="text-muted-foreground">Potential Profit</span>
-                <span className="font-bold text-right text-emerald-400">
-                  +{formatNaira(estimatedProfit)}
-                </span>
-              </div>
-            </motion.div>
-          )}
+            )}
+          </div>
 
-          {/* Confirm Trade */}
+          {/* 4. Trade Duration */}
+          <div className="space-y-2">
+            <p className="text-xs text-muted-foreground">Trade Duration</p>
+            <Select
+              value={duration.toString()}
+              onValueChange={(v) => setDuration(parseInt(v))}
+            >
+              <SelectTrigger className="w-full bg-white/5 border-white/10 focus:border-gold h-11">
+                <Clock className="w-4 h-4 text-muted-foreground mr-2" />
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent className="glass-strong border-white/10">
+                {DURATION_OPTIONS.map((opt) => (
+                  <SelectItem key={opt.value} value={opt.value.toString()}>
+                    {opt.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+
+          {/* Place Trade Button */}
           <Button
             onClick={handleTrade}
             disabled={!prediction || amountNum <= 0 || amountNum > availableBalance || trading}
-            className="w-full gradient-gold text-gold-foreground font-bold h-12 text-base disabled:opacity-40 disabled:cursor-not-allowed"
+            className="w-full gradient-gold text-gold-foreground font-bold h-13 text-base disabled:opacity-40 disabled:cursor-not-allowed"
           >
             {!prediction || amountNum <= 0 ? (
               'Select Prediction & Amount'
@@ -606,12 +546,12 @@ export default function MarketView() {
                 Trading...
               </span>
             ) : (
-              `Confirm ${prediction === 'UP' ? 'BUY' : 'SELL'} Trade — ${formatNaira(amountNum)}`
+              `Place Trade \u2014 ${formatNaira(amountNum)}`
             )}
           </Button>
         </motion.div>
 
-        {/* Trading Overlay */}
+        {/* ═══════ Trading Overlay (no multiplier shown) ═══════ */}
         <AnimatePresence>
           {trading && tradeCountdown !== null && !tradeResult && (
             <motion.div
@@ -637,15 +577,13 @@ export default function MarketView() {
                     }`}
                   />
                   {prediction === 'UP' ? (
-                    <ArrowUpCircle className={`w-10 h-10 text-emerald-400 absolute`} />
+                    <ArrowUpCircle className="w-10 h-10 text-emerald-400 absolute" />
                   ) : (
-                    <ArrowDownCircle className={`w-10 h-10 text-red-400 absolute`} />
+                    <ArrowDownCircle className="w-10 h-10 text-red-400 absolute" />
                   )}
                 </div>
 
-                <h3 className="text-xl font-bold mb-1">
-                  Trade in Progress
-                </h3>
+                <h3 className="text-xl font-bold mb-1">Trade in Progress</h3>
                 <p className="text-sm text-muted-foreground mb-6">
                   Waiting for {DURATION_OPTIONS.find((d) => d.value === duration)?.label || `${duration}s`} to complete...
                 </p>
@@ -671,16 +609,14 @@ export default function MarketView() {
 
                 <div className="mt-4 glass rounded-lg p-3 text-sm">
                   <div className="flex justify-between">
-                    <span className="text-muted-foreground">Amount</span>
+                    <span className="text-muted-foreground">Investment</span>
                     <span className="font-semibold">{formatNaira(amountNum)}</span>
                   </div>
                   <div className="flex justify-between mt-1">
-                    <span className="text-muted-foreground">Multiplier</span>
-                    <span className="font-semibold">{multiplier.toFixed(2)}x</span>
-                  </div>
-                  <div className="flex justify-between mt-1">
-                    <span className="text-muted-foreground">Potential</span>
-                    <span className="font-semibold text-emerald-400">+{formatNaira(estimatedProfit)}</span>
+                    <span className="text-muted-foreground">Prediction</span>
+                    <span className={`font-semibold ${prediction === 'UP' ? 'text-emerald-400' : 'text-red-400'}`}>
+                      {prediction === 'UP' ? 'BUY' : 'SELL'}
+                    </span>
                   </div>
                 </div>
               </motion.div>
@@ -688,7 +624,7 @@ export default function MarketView() {
           )}
         </AnimatePresence>
 
-        {/* Trade Result Overlay */}
+        {/* ═══════ Trade Result Overlay (shows final multiplier) ═══════ */}
         <AnimatePresence>
           {tradeResult && (
             <motion.div
@@ -743,16 +679,40 @@ export default function MarketView() {
                   {tradeResult.message}
                 </motion.p>
 
-                <motion.div
-                  initial={{ opacity: 0, y: 10 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ delay: 0.4 }}
-                  className={`text-4xl font-bold font-mono mb-6 ${
-                    tradeResult.win ? 'text-emerald-400' : 'text-red-400'
-                  }`}
-                >
-                  {tradeResult.win ? '+' : ''}{formatNaira(tradeResult.profit)}
-                </motion.div>
+                {tradeResult.win ? (
+                  <motion.div
+                    initial={{ opacity: 0, y: 10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ delay: 0.4 }}
+                    className="glass rounded-lg p-3 text-sm space-y-1.5 mb-6"
+                  >
+                    <div className="flex justify-between">
+                      <span className="text-muted-foreground">Investment</span>
+                      <span className="font-medium">{formatNaira(amountNum)}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-muted-foreground">Multiplier</span>
+                      <span className="font-medium text-gold">{tradeResult.multiplier.toFixed(2)}x</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-muted-foreground">Total Return</span>
+                      <span className="font-medium text-emerald-400">{formatNaira(tradeResult.totalReturn)}</span>
+                    </div>
+                    <div className="border-t border-white/10 pt-1.5 flex justify-between">
+                      <span className="text-muted-foreground font-medium">Profit</span>
+                      <span className="font-bold text-emerald-400">+{formatNaira(tradeResult.profit)}</span>
+                    </div>
+                  </motion.div>
+                ) : (
+                  <motion.div
+                    initial={{ opacity: 0, y: 10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ delay: 0.4 }}
+                    className={`text-4xl font-bold font-mono mb-6 text-red-400`}
+                  >
+                    -{formatNaira(amountNum)}
+                  </motion.div>
+                )}
 
                 <Button
                   onClick={() => setTradeResult(null)}
@@ -824,7 +784,7 @@ export default function MarketView() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {filteredHistory.map((trade, i) => (
+                  {filteredHistory.map((trade) => (
                     <TableRow key={trade.id} className="border-white/5">
                       <TableCell className="text-xs text-muted-foreground py-2">
                         {new Date(trade.createdAt).toLocaleDateString('en-US', {

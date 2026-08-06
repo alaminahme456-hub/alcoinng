@@ -23,49 +23,62 @@ function generateEndPrice(prediction: string): number {
   }
 }
 
+/**
+ * Generate a random multiplier between 1.10 and 1.50.
+ * This is calculated at the END of the trade duration, not shown to the user.
+ */
+function generateMultiplier(): number {
+  return Math.floor(Math.random() * 4100 + 11000) / 10000; // 1.10 to 1.51 (clamped below)
+}
+
 export async function POST(req: NextRequest) {
   try {
     const auth = await requireAuth(req);
     if (!isAuthUser(auth)) return auth;
 
-    const { fundingWallet, prediction, amount, payoutMultiplier, duration } = await req.json();
-    if (!fundingWallet || !prediction || !amount || !payoutMultiplier || !duration) {
-      return NextResponse.json({ error: 'All fields are required' }, { status: 400 });
+    const { wallet, prediction, amount, duration } = await req.json();
+    if (!wallet || !prediction || !amount || !duration) {
+      return NextResponse.json({ error: 'Wallet, prediction, amount, and duration are required' }, { status: 400 });
     }
-    if (!['reward', 'deposit', 'profit'].includes(fundingWallet)) return NextResponse.json({ error: 'Invalid wallet type' }, { status: 400 });
-    if (!['buy', 'sell'].includes(prediction)) return NextResponse.json({ error: 'Prediction must be buy or sell' }, { status: 400 });
+    if (!['reward', 'deposit', 'profit'].includes(wallet)) {
+      return NextResponse.json({ error: 'Invalid wallet type' }, { status: 400 });
+    }
+    if (!['buy', 'sell'].includes(prediction)) {
+      return NextResponse.json({ error: 'Prediction must be buy or sell' }, { status: 400 });
+    }
 
     const numAmount = Number(amount);
-    const numMultiplier = Number(payoutMultiplier);
     const numDuration = Number(duration);
-    if (numAmount <= 0 || numMultiplier <= 0 || numDuration <= 0) {
-      return NextResponse.json({ error: 'Amount, multiplier and duration must be positive' }, { status: 400 });
+    if (numAmount <= 0 || numDuration <= 0) {
+      return NextResponse.json({ error: 'Amount and duration must be positive' }, { status: 400 });
     }
-    if (!auth.profile.isActivated) return NextResponse.json({ error: 'Account must be activated' }, { status: 403 });
+    if (!auth.profile.isActivated) {
+      return NextResponse.json({ error: 'Account must be activated' }, { status: 403 });
+    }
 
     // Check wallet balance
-    const { data: wallet } = await supabaseAdmin
+    const { data: fundWallet } = await supabaseAdmin
       .from('wallets')
       .select('*')
       .eq('user_id', auth.id)
-      .eq('type', fundingWallet)
+      .eq('type', wallet)
       .single();
 
-    if (!wallet || Number(wallet.balance) < numAmount) {
+    if (!fundWallet || Number(fundWallet.balance) < numAmount) {
       return NextResponse.json({ error: 'Insufficient balance' }, { status: 400 });
     }
 
-    // Debit wallet
-    const newBalance = Number(wallet.balance) - numAmount;
-    await supabaseAdmin.from('wallets').update({ balance: newBalance }).eq('id', wallet.id);
+    // Deduct investment from wallet immediately
+    const newBalance = Number(fundWallet.balance) - numAmount;
+    await supabaseAdmin.from('wallets').update({ balance: newBalance }).eq('id', fundWallet.id);
 
     const startPrice = generateStartPrice();
     const { data: trade } = await supabaseAdmin.from('trades').insert({
       user_id: auth.id,
-      funding_wallet: fundingWallet,
+      funding_wallet: wallet,
       prediction,
       amount: numAmount,
-      payout_multiplier: numMultiplier,
+      payout_multiplier: 0, // placeholder, updated after duration
       duration: numDuration,
       start_price: startPrice,
     }).select().single();
@@ -75,42 +88,75 @@ export async function POST(req: NextRequest) {
     // Wait for trade duration
     await new Promise<void>((resolve) => setTimeout(resolve, numDuration * 1000));
 
+    // Generate hidden multiplier (1.10x to 1.50x)
+    const finalMultiplier = Math.min(1.50, Math.max(1.10, generateMultiplier()));
+
     // Generate result
     const priceChange = generateEndPrice(prediction);
     const endPrice = Math.max(0.01, startPrice + priceChange);
     const isWin = (prediction === 'buy' && endPrice > startPrice) || (prediction === 'sell' && endPrice < startPrice);
     const result = isWin ? 'win' : 'loss';
-    const profit = isWin ? numAmount * (numMultiplier - 1) : 0;
 
+    // Calculate payout
+    const totalReturn = isWin ? Math.floor(numAmount * finalMultiplier) : 0;
+    const profit = isWin ? totalReturn - numAmount : 0;
+
+    // Update trade record with final values
     await supabaseAdmin.from('trades').update({
       end_price: endPrice,
       result,
+      payout_multiplier: finalMultiplier,
       profit,
     }).eq('id', trade.id);
 
+    // Credit wallets according to rules
     if (isWin) {
-      if (fundingWallet === 'reward') {
+      if (wallet === 'reward') {
+        // Reward Wallet: return investment to Reward, credit profit to Profit
         const { data: rw } = await supabaseAdmin.from('wallets').select('*').eq('user_id', auth.id).eq('type', 'reward').single();
         if (rw) await supabaseAdmin.from('wallets').update({ balance: Number(rw.balance) + numAmount }).eq('id', rw.id);
 
         const { data: pw } = await supabaseAdmin.from('wallets').select('*').eq('user_id', auth.id).eq('type', 'profit').single();
         if (pw) await supabaseAdmin.from('wallets').update({ balance: Number(pw.balance) + profit }).eq('id', pw.id);
       } else {
-        const { data: fw } = await supabaseAdmin.from('wallets').select('*').eq('user_id', auth.id).eq('type', fundingWallet).single();
-        if (fw) await supabaseAdmin.from('wallets').update({ balance: Number(fw.balance) + numAmount + profit }).eq('id', fw.id);
+        // Deposit or Profit Wallet: return both investment + profit to the same wallet
+        const { data: fw } = await supabaseAdmin.from('wallets').select('*').eq('user_id', auth.id).eq('type', wallet).single();
+        if (fw) await supabaseAdmin.from('wallets').update({ balance: Number(fw.balance) + totalReturn }).eq('id', fw.id);
       }
-      await insertNotification(auth.id, 'Trade Won!', `Your ${prediction.toUpperCase()} trade won! Profit: \u20a6${profit.toLocaleString()}`, 'trade');
+
+      await insertNotification(
+        auth.id,
+        'Trade Won!',
+        `Your ${prediction.toUpperCase()} trade won! Investment: \u20a6${numAmount.toLocaleString()} x ${finalMultiplier.toFixed(2)} = \u20a6${totalReturn.toLocaleString()}. Profit: \u20a6${profit.toLocaleString()}`,
+        'trade'
+      );
     } else {
-      await insertNotification(auth.id, 'Trade Lost', `Your ${prediction.toUpperCase()} trade lost. \u20a6${numAmount.toLocaleString()} was deducted.`, 'trade');
+      await insertNotification(
+        auth.id,
+        'Trade Lost',
+        `Your ${prediction.toUpperCase()} trade lost. \u20a6${numAmount.toLocaleString()} was deducted.`,
+        'trade'
+      );
     }
 
-    await insertAuditLog(auth.id, 'TRADE', `${result.toUpperCase()}: ${prediction.toUpperCase()} \u20a6${numAmount.toLocaleString()} (start: ${startPrice}, end: ${endPrice})`);
+    await insertAuditLog(
+      auth.id,
+      'TRADE',
+      `${result.toUpperCase()}: ${prediction.toUpperCase()} \u20a6${numAmount.toLocaleString()} x${finalMultiplier.toFixed(2)} (start: ${startPrice}, end: ${endPrice})`
+    );
 
     // Fetch updated trade and wallets
     const { data: updatedTrade } = await supabaseAdmin.from('trades').select('*').eq('id', trade.id).single();
-    const { data: wallets } = await supabaseAdmin.from('wallets').select('*').eq('user_id', auth.id);
+    const { data: updatedWallets } = await supabaseAdmin.from('wallets').select('*').eq('user_id', auth.id);
 
-    return NextResponse.json({ trade: updatedTrade, wallets, message: isWin ? 'Trade won!' : 'Trade lost' });
+    return NextResponse.json({
+      trade: updatedTrade,
+      wallets: updatedWallets,
+      result,
+      message: isWin
+        ? `Trade won! ${finalMultiplier.toFixed(2)}x multiplier applied.`
+        : 'Trade lost. Better luck next time.',
+    });
   } catch (error: unknown) {
     console.error('Trade error:', error);
     const message = error instanceof Error ? error.message : 'Trade failed';
