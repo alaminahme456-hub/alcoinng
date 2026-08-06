@@ -7,7 +7,7 @@ import { useAppStore, apiFetch, ViewName } from '@/store';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Coins, User, Phone, UserPlus, ArrowRight, ShieldCheck } from 'lucide-react';
+import { User, Phone, UserPlus, ArrowRight, ShieldCheck } from 'lucide-react';
 
 export default function AuthView() {
   const { view, setView, setUser, setToken } = useAppStore();
@@ -102,9 +102,7 @@ export default function AuthView() {
       return (
         <div className="min-h-screen flex items-center justify-center p-4">
           <div className="text-center">
-            <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl gradient-gold gold-glow mb-4">
-              <Coins className="w-8 h-8 text-gold-foreground animate-spin" />
-            </div>
+            <img src="/alcoin-logo.jpg" alt="ALCOIN" className="w-16 h-16 rounded-2xl gold-glow mb-4 animate-pulse" />
             <p className="text-muted-foreground">Setting up your account...</p>
           </div>
         </div>
@@ -120,9 +118,7 @@ export default function AuthView() {
             animate={{ scale: 1, opacity: 1 }}
             className="text-center mb-8"
           >
-            <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl gradient-gold gold-glow mb-4">
-              <ShieldCheck className="w-8 h-8 text-gold-foreground" />
-            </div>
+            <img src="/alcoin-logo.jpg" alt="ALCOIN" className="w-16 h-16 rounded-2xl gold-glow mb-4" />
             <h1 className="text-3xl font-bold gradient-gold-text">ALCOIN</h1>
             <p className="text-muted-foreground text-sm mt-1">Complete your profile to continue</p>
           </motion.div>
@@ -234,9 +230,7 @@ export default function AuthView() {
           animate={{ scale: 1, opacity: 1 }}
           className="text-center mb-8"
         >
-          <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl gradient-gold gold-glow mb-4">
-            <Coins className="w-8 h-8 text-gold-foreground" />
-          </div>
+          <img src="/alcoin-logo.jpg" alt="ALCOIN" className="w-16 h-16 rounded-2xl gold-glow mb-4" />
           <h1 className="text-3xl font-bold gradient-gold-text">ALCOIN</h1>
           <p className="text-muted-foreground text-sm mt-1">Digital Rewards Platform</p>
         </motion.div>

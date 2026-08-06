@@ -19,7 +19,7 @@ export const metadata: Metadata = {
   description: "Earn rewards, invest, and withdraw with ALCOIN. Activate your account, complete tasks, watch ads, and trade on the AL Coin Market.",
   keywords: ["ALCOIN", "rewards", "earn money", "digital rewards", "AL Coin Market"],
   icons: {
-    icon: "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🪙</text></svg>",
+    icon: '/alcoin-logo.jpg',
   },
 };
 

@@ -6,7 +6,7 @@ import { useAuth } from '@clerk/nextjs';
 import {
   LayoutDashboard, Users, Key, CreditCard, Megaphone,
   ClipboardList, ArrowDownToLine, Bell, BarChart3, Share2,
-  Menu, LogOut, X, Coins, ArrowLeft,
+  Menu, LogOut, X, ArrowLeft,
 } from 'lucide-react';
 import { useAppStore, ViewName } from '@/store';
 import { Button } from '@/components/ui/button';
@@ -51,9 +51,7 @@ function SidebarContent({
   return (
     <div className="flex flex-col h-full">
       <div className="p-6 flex items-center gap-3">
-        <div className="w-10 h-10 rounded-xl gradient-gold flex items-center justify-center">
-          <Coins className="w-5 h-5 text-[#0a0a0f]" />
-        </div>
+        <img src="/alcoin-logo.jpg" alt="ALCOIN" className="w-10 h-10 rounded-xl" />
         <div>
           <h1 className="text-lg font-bold gradient-gold-text">ALCOIN</h1>
           <p className="text-xs text-muted-foreground">Admin Panel</p>
