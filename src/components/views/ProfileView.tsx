@@ -11,7 +11,7 @@ import { ArrowLeft, User, Building2, Lock, Save, CheckCircle2, ShieldCheck, LogO
 import { useAuth } from '@clerk/nextjs';
 
 export default function ProfileView() {
-  const { user, setUser, setView } = useAppStore();
+  const { user, setUser, setView, logout } = useAppStore();
   const { signOut } = useAuth();
   const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
   const [activeTab, setActiveTab] = useState('profile');
@@ -74,9 +74,10 @@ export default function ProfileView() {
 
   const handleLogout = async () => {
     try {
-      await signOut({ redirectUrl: '/' });
+      logout();
+      await signOut();
     } catch {
-      window.location.href = '/';
+      logout();
     }
   };
 

@@ -103,12 +103,12 @@ export default function AdminLayout({
 }: {
   children: React.ReactNode;
 }) {
-  const { view, setView, user } = useAppStore();
+  const { view, setView, user, logout } = useAppStore();
   const { signOut } = useAuth();
   const [mobileOpen, setMobileOpen] = useState(false);
 
   const handleLogout = async () => {
-    try { await signOut({ redirectUrl: '/' }); } catch { window.location.href = '/'; }
+    try { logout(); await signOut(); } catch { logout(); }
   };
 
   const handleNavigate = (v: ViewName) => {
