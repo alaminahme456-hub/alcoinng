@@ -229,30 +229,68 @@ export default function MarketView() {
     };
   }, [generatePriceTick, currentPrice]);
 
-  // Trade countdown
+  // Trade countdown — fires independently, result shown via effect below
   const countdownRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const tradeCountdownRef = useRef<number | null>(null);
+  const pendingTradeData = useRef<any>(null);
 
   useEffect(() => {
-    if (tradeCountdown === null) return;
-    tradeCountdownRef.current = tradeCountdown;
+    if (tradeCountdown === null || tradeCountdown === 0) return;
+
+    // Clear any previous interval
+    if (countdownRef.current) clearInterval(countdownRef.current);
 
     countdownRef.current = setInterval(() => {
       setTradeCountdown((prev) => {
         if (prev === null || prev <= 1) {
           if (countdownRef.current) clearInterval(countdownRef.current);
-          tradeCountdownRef.current = 0;
+          countdownRef.current = null;
           return 0;
         }
-        tradeCountdownRef.current = prev - 1;
         return prev - 1;
       });
     }, 1000);
 
     return () => {
-      if (countdownRef.current) clearInterval(countdownRef.current);
+      if (countdownRef.current) {
+        clearInterval(countdownRef.current);
+        countdownRef.current = null;
+      }
     };
   }, [tradeCountdown]);
+
+  // When countdown reaches 0, if API result is ready, show it
+  useEffect(() => {
+    if (tradeCountdown === 0 && pendingTradeData.current) {
+      const data = pendingTradeData.current;
+      pendingTradeData.current = null;
+
+      const timer = setTimeout(() => {
+        const isWin = data.trade?.result === 'win';
+        const multiplierUsed = data.trade?.payout_multiplier || 1.0;
+        const totalReturn = isWin ? amountNum * multiplierUsed : 0;
+        const profit = isWin ? totalReturn - amountNum : 0;
+
+        setTradeResult({
+          win: isWin,
+          profit,
+          totalReturn,
+          multiplier: multiplierUsed,
+          message: data.message || (isWin ? 'Trade successful!' : 'Better luck next time.'),
+        });
+
+        toast.success(
+          isWin ? `Trade Won! +${formatNaira(profit)}` : `Trade Lost`,
+          { description: data.message || '' }
+        );
+
+        setTrading(false);
+        refreshWallets();
+        fetchHistory();
+      }, 500);
+
+      return () => clearTimeout(timer);
+    }
+  }, [tradeCountdown, amountNum, refreshWallets, fetchHistory]);
 
   const availableBalance = wallets[WALLET_CONFIG[selectedWallet].balanceKey];
   const amountNum = parseFloat(tradeAmount) || 0;
@@ -273,13 +311,15 @@ export default function MarketView() {
       return;
     }
 
+    // Reset all trade state cleanly
     setTrading(true);
     setTradeResult(null);
+    pendingTradeData.current = null;
     setTradeCountdown(duration);
 
     try {
-      // Fire API call immediately (server resolves trade instantly now)
-      const dataPromise = apiFetch('/api/market/trade', {
+      // Fire API call — server resolves instantly
+      const data = await apiFetch('/api/market/trade', {
         method: 'POST',
         body: JSON.stringify({
           wallet: selectedWallet,
@@ -289,49 +329,32 @@ export default function MarketView() {
         }),
       });
 
-      // Wait for the visual countdown to finish
-      await new Promise<void>((resolve) => {
-        const check = setInterval(() => {
-          if (tradeCountdownRef.current === 0) {
-            clearInterval(check);
-            resolve();
-          }
-        }, 100);
-      });
+      // Store result — the countdown effect will show it when timer hits 0
+      pendingTradeData.current = data;
 
-      // Small delay for dramatic effect
-      await new Promise((r) => setTimeout(r, 500));
-
-      // API should be done by now (it resolves instantly), get result
-      const data = await dataPromise;
-
-      const isWin = data.trade?.result === 'win';
-      const multiplierUsed = data.trade?.payout_multiplier || 1.0;
-      const totalReturn = isWin ? amountNum * multiplierUsed : 0;
-      const profit = isWin ? totalReturn - amountNum : 0;
-
-      setTradeResult({
-        win: isWin,
-        profit,
-        totalReturn,
-        multiplier: multiplierUsed,
-        message: data.message || (isWin ? 'Trade successful!' : 'Better luck next time.'),
-      });
-
-      toast.success(
-        isWin
-          ? `Trade Won! +${formatNaira(profit)}`
-          : `Trade Lost`,
-        { description: data.message || '' }
-      );
-
-      refreshWallets();
-      fetchHistory();
+      // Edge case: if countdown already finished (shouldn't happen), show immediately
+      if (tradeCountdown === 0) {
+        pendingTradeData.current = null;
+        const isWin = data.trade?.result === 'win';
+        const multiplierUsed = data.trade?.payout_multiplier || 1.0;
+        const totalReturn = isWin ? amountNum * multiplierUsed : 0;
+        const profit = isWin ? totalReturn - amountNum : 0;
+        setTradeResult({
+          win: isWin, profit, totalReturn, multiplier: multiplierUsed,
+          message: data.message || (isWin ? 'Trade successful!' : 'Better luck next time.'),
+        });
+        toast.success(isWin ? `Trade Won! +${formatNaira(profit)}` : `Trade Lost`);
+        setTrading(false);
+        refreshWallets();
+        fetchHistory();
+      }
+      // Otherwise: the useEffect watching tradeCountdown === 0 will handle it
     } catch (err: any) {
+      // On error: stop everything and let user retry
+      pendingTradeData.current = null;
       setTradeCountdown(null);
-      toast.error(err.message || 'Trade failed');
-    } finally {
       setTrading(false);
+      toast.error(err.message || 'Trade failed');
     }
   };
 
@@ -717,7 +740,7 @@ export default function MarketView() {
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
               className="fixed inset-0 z-50 bg-black/85 backdrop-blur-md flex items-center justify-center p-4"
-              onClick={() => setTradeResult(null)}
+              onClick={() => { setTradeResult(null); setTradeCountdown(null); }}
             >
               <motion.div
                 initial={{ scale: 0.5, opacity: 0 }}
@@ -800,7 +823,7 @@ export default function MarketView() {
                 )}
 
                 <Button
-                  onClick={() => setTradeResult(null)}
+                  onClick={() => { setTradeResult(null); setTradeCountdown(null); }}
                   className={`w-full font-semibold h-11 ${
                     tradeResult.win
                       ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 hover:bg-emerald-500/30'
