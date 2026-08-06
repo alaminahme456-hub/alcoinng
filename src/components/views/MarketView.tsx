@@ -231,16 +231,20 @@ export default function MarketView() {
 
   // Trade countdown
   const countdownRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const tradeCountdownRef = useRef<number | null>(null);
 
   useEffect(() => {
     if (tradeCountdown === null) return;
+    tradeCountdownRef.current = tradeCountdown;
 
     countdownRef.current = setInterval(() => {
       setTradeCountdown((prev) => {
         if (prev === null || prev <= 1) {
           if (countdownRef.current) clearInterval(countdownRef.current);
+          tradeCountdownRef.current = 0;
           return 0;
         }
+        tradeCountdownRef.current = prev - 1;
         return prev - 1;
       });
     }, 1000);
@@ -274,7 +278,8 @@ export default function MarketView() {
     setTradeCountdown(duration);
 
     try {
-      const data = await apiFetch('/api/market/trade', {
+      // Fire API call immediately (server resolves trade instantly now)
+      const dataPromise = apiFetch('/api/market/trade', {
         method: 'POST',
         body: JSON.stringify({
           wallet: selectedWallet,
@@ -284,10 +289,21 @@ export default function MarketView() {
         }),
       });
 
-      setTradeCountdown(0);
+      // Wait for the visual countdown to finish
+      await new Promise<void>((resolve) => {
+        const check = setInterval(() => {
+          if (tradeCountdownRef.current === 0) {
+            clearInterval(check);
+            resolve();
+          }
+        }, 100);
+      });
 
       // Small delay for dramatic effect
-      await new Promise((r) => setTimeout(r, 400));
+      await new Promise((r) => setTimeout(r, 500));
+
+      // API should be done by now (it resolves instantly), get result
+      const data = await dataPromise;
 
       const isWin = data.trade?.result === 'win';
       const multiplierUsed = data.trade?.payout_multiplier || 1.0;

@@ -3,24 +3,10 @@ import { supabaseAdmin } from '@/lib/supabase/admin';
 import { insertAuditLog, insertNotification } from '@/lib/db';
 import { requireAuth, isAuthUser } from '@/lib/req-helpers';
 
-export const maxDuration = 60;
+export const maxDuration = 30;
 
 function generateStartPrice(): number {
   return Math.floor(Math.random() * 10000) / 100 + 1;
-}
-
-function generateEndPrice(prediction: string): number {
-  const isCorrect = Math.random() < 0.55;
-  const volatility = Math.random() * 20 + 5;
-  if (isCorrect) {
-    return prediction === 'buy'
-      ? Math.floor(Math.random() * volatility * 100 + 101) / 100
-      : -(Math.floor(Math.random() * volatility * 100 + 101) / 100);
-  } else {
-    return prediction === 'buy'
-      ? -(Math.floor(Math.random() * volatility * 100 + 101) / 100)
-      : Math.floor(Math.random() * volatility * 100 + 101) / 100;
-  }
 }
 
 /**
@@ -73,27 +59,17 @@ export async function POST(req: NextRequest) {
     await supabaseAdmin.from('wallets').update({ balance: newBalance }).eq('id', fundWallet.id);
 
     const startPrice = generateStartPrice();
-    const { data: trade } = await supabaseAdmin.from('trades').insert({
-      user_id: auth.id,
-      funding_wallet: wallet,
-      prediction,
-      amount: numAmount,
-      payout_multiplier: 0, // placeholder, updated after duration
-      duration: numDuration,
-      start_price: startPrice,
-    }).select().single();
-
-    if (!trade) throw new Error('Failed to create trade');
-
-    // Wait for trade duration
-    await new Promise<void>((resolve) => setTimeout(resolve, numDuration * 1000));
 
     // Generate hidden multiplier (1.10x to 1.50x)
     const finalMultiplier = Math.min(1.50, Math.max(1.10, generateMultiplier()));
 
-    // Generate result
-    const priceChange = generateEndPrice(prediction);
-    const endPrice = Math.max(0.01, startPrice + priceChange);
+    // Determine win/loss (55% win rate)
+    const isCorrect = Math.random() < 0.55;
+    const volatility = Math.random() * 20 + 5;
+    const priceDelta = isCorrect
+      ? (prediction === 'buy' ? 1 : -1) * (Math.random() * volatility * 100 + 101) / 100
+      : (prediction === 'buy' ? -1 : 1) * (Math.random() * volatility * 100 + 101) / 100;
+    const endPrice = Math.max(0.01, startPrice + priceDelta);
     const isWin = (prediction === 'buy' && endPrice > startPrice) || (prediction === 'sell' && endPrice < startPrice);
     const result = isWin ? 'win' : 'loss';
 
@@ -101,13 +77,28 @@ export async function POST(req: NextRequest) {
     const totalReturn = isWin ? Math.floor(numAmount * finalMultiplier) : 0;
     const profit = isWin ? totalReturn - numAmount : 0;
 
-    // Update trade record with final values
-    await supabaseAdmin.from('trades').update({
+    // Insert trade record with all final values in one shot (no update needed)
+    const { data: trade, error: tradeErr } = await supabaseAdmin.from('trades').insert({
+      user_id: auth.id,
+      funding_wallet: wallet,
+      prediction,
+      amount: numAmount,
+      payout_multiplier: finalMultiplier,
+      duration: numDuration,
+      start_price: startPrice,
       end_price: endPrice,
       result,
-      payout_multiplier: finalMultiplier,
       profit,
-    }).eq('id', trade.id);
+    }).select().single();
+
+    if (tradeErr) {
+      console.error('Trade insert error:', tradeErr);
+      // Refund the deducted amount since trade record failed
+      await supabaseAdmin.from('wallets').update({ balance: newBalance + numAmount }).eq('id', fundWallet.id);
+      throw new Error('Failed to create trade record');
+    }
+
+    if (!trade) throw new Error('Failed to create trade');
 
     // Credit wallets according to rules
     if (isWin) {
