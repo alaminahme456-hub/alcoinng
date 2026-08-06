@@ -69,6 +69,11 @@ export async function POST(req: NextRequest) {
       bank_account_name: bankAccountName,
     }).select().single();
 
+    // Deduct amount from wallet immediately
+    await supabaseAdmin.from('wallets').update({
+      balance: Number(walletRow.balance) - numAmount,
+    }).eq('id', walletRow.id);
+
     await insertNotification(auth.id, 'Withdrawal Requested', `Your withdrawal of \u20a6${numAmount.toLocaleString()} from ${wallet} wallet is pending review.`, 'withdrawal');
     await insertAuditLog(auth.id, 'WITHDRAWAL_REQUEST', `Requested \u20a6${numAmount.toLocaleString()} from ${wallet} wallet`);
 
