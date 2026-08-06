@@ -43,13 +43,13 @@ interface StatCard {
 }
 
 const colorMap: Record<string, { bg: string; icon: string; border: string }> = {
-  gold: { bg: 'bg-[#d4a853]/10', icon: 'text-[#d4a853]', border: 'border-[#d4a853]/20' },
+  gold: { bg: 'bg-[#d4af37]/10', icon: 'text-[#d4af37]', border: 'border-[#d4af37]/20' },
   blue: { bg: 'bg-[#3b82f6]/10', icon: 'text-[#3b82f6]', border: 'border-[#3b82f6]/20' },
   green: { bg: 'bg-[#10b981]/10', icon: 'text-[#10b981]', border: 'border-[#10b981]/20' },
   red: { bg: 'bg-[#ef4444]/10', icon: 'text-[#ef4444]', border: 'border-[#ef4444]/20' },
   purple: { bg: 'bg-[#8b5cf6]/10', icon: 'text-[#8b5cf6]', border: 'border-[#8b5cf6]/20' },
   cyan: { bg: 'bg-[#06b6d4]/10', icon: 'text-[#06b6d4]', border: 'border-[#06b6d4]/20' },
-  amber: { bg: 'bg-[#f59e0b]/10', icon: 'text-[#f59e0b]', border: 'border-[#f59e0b]/20' },
+  amber: { bg: 'bg-[#ffd700]/10', icon: 'text-[#ffd700]', border: 'border-[#ffd700]/20' },
   emerald: { bg: 'bg-[#059669]/10', icon: 'text-[#059669]', border: 'border-[#059669]/20' },
 };
 
@@ -145,7 +145,7 @@ export default function AdminDashboard() {
                       animate={{ opacity: 1, x: 0 }}
                       className="flex items-start gap-3 p-3 rounded-xl hover:bg-white/[0.03] transition-colors"
                     >
-                      <div className="w-2 h-2 rounded-full bg-[#d4a853] mt-2 shrink-0" />
+                      <div className="w-2 h-2 rounded-full bg-[#d4af37] mt-2 shrink-0" />
                       <div className="flex-1 min-w-0">
                         <p className="text-sm font-medium">{activity.description}</p>
                         <p className="text-xs text-muted-foreground mt-1">

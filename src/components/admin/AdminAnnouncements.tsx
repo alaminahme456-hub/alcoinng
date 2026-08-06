@@ -170,7 +170,7 @@ export default function AdminAnnouncements() {
                   <div className="flex items-start justify-between gap-4">
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2 mb-1">
-                        <Bell className="w-4 h-4 text-[#d4a853] shrink-0" />
+                        <Bell className="w-4 h-4 text-[#d4af37] shrink-0" />
                         <h3 className="font-semibold truncate">{a.title}</h3>
                         <Badge
                           className={a.active
@@ -189,7 +189,7 @@ export default function AdminAnnouncements() {
                     <div className="flex items-center gap-1 shrink-0">
                       <Button
                         size="icon" variant="ghost"
-                        className={`h-8 w-8 ${a.active ? 'text-[#d4a853] hover:text-[#d4a853] hover:bg-[#d4a853]/10' : 'text-muted-foreground'}`}
+                        className={`h-8 w-8 ${a.active ? 'text-[#d4af37] hover:text-[#d4af37] hover:bg-[#d4af37]/10' : 'text-muted-foreground'}`}
                         onClick={() => handleToggle(a)}
                         disabled={toggling === a.id}
                       >

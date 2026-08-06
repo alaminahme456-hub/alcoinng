@@ -193,7 +193,7 @@ export default function AdminUsers() {
                           variant={user.isActivated ? 'default' : 'outline'}
                           className={
                             user.isActivated
-                              ? 'bg-[#d4a853]/15 text-[#d4a853] hover:bg-[#d4a853]/20 border-0'
+                              ? 'bg-[#d4af37]/15 text-[#d4af37] hover:bg-[#d4af37]/20 border-0'
                               : 'text-muted-foreground'
                           }
                         >
@@ -220,7 +220,7 @@ export default function AdminUsers() {
                           <Button
                             size="icon"
                             variant="ghost"
-                            className="h-8 w-8 text-[#f59e0b] hover:text-[#f59e0b] hover:bg-[#f59e0b]/10"
+                            className="h-8 w-8 text-[#ffd700] hover:text-[#ffd700] hover:bg-[#ffd700]/10"
                             onClick={() => setConfirmAction({ type: 'suspend', user })}
                           >
                             <Ban className="w-4 h-4" />

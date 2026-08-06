@@ -203,7 +203,7 @@ export default function AdminTasks() {
                         </TableCell>
                         <TableCell>₦{task.reward.toLocaleString()}</TableCell>
                         <TableCell>
-                          <Badge variant={task.requiresProof ? 'default' : 'outline'} className={task.requiresProof ? 'bg-[#d4a853]/15 text-[#d4a853] border-0' : ''}>
+                          <Badge variant={task.requiresProof ? 'default' : 'outline'} className={task.requiresProof ? 'bg-[#d4af37]/15 text-[#d4af37] border-0' : ''}>
                             {task.requiresProof ? 'Yes' : 'No'}
                           </Badge>
                         </TableCell>
@@ -214,7 +214,7 @@ export default function AdminTasks() {
                         </TableCell>
                         <TableCell className="hidden sm:table-cell">
                           {task.pendingSubmissions > 0 ? (
-                            <Badge className="bg-[#f59e0b]/15 text-[#f59e0b] border-0">
+                            <Badge className="bg-[#ffd700]/15 text-[#ffd700] border-0">
                               {task.pendingSubmissions}
                             </Badge>
                           ) : (
@@ -232,7 +232,7 @@ export default function AdminTasks() {
                           >
                             {expandedTask === task.id ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
                             {task.pendingSubmissions > 0 && (
-                              <span className="text-xs text-[#f59e0b]">{task.pendingSubmissions}</span>
+                              <span className="text-xs text-[#ffd700]">{task.pendingSubmissions}</span>
                             )}
                           </Button>
                         </TableCell>

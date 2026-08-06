@@ -34,7 +34,7 @@ interface Withdrawal {
 }
 
 const statusConfig: Record<string, { label: string; bg: string; icon: React.ElementType }> = {
-  pending: { label: 'Pending', bg: 'bg-[#f59e0b]/15 text-[#f59e0b] border-0 hover:bg-[#f59e0b]/20', icon: Clock },
+  pending: { label: 'Pending', bg: 'bg-[#ffd700]/15 text-[#ffd700] border-0 hover:bg-[#ffd700]/20', icon: Clock },
   approved: { label: 'Approved', bg: 'bg-[#3b82f6]/15 text-[#3b82f6] border-0 hover:bg-[#3b82f6]/20', icon: CheckCircle },
   rejected: { label: 'Rejected', bg: 'bg-destructive/15 text-destructive border-0 hover:bg-destructive/20', icon: XCircle },
   paid: { label: 'Paid', bg: 'bg-[#10b981]/15 text-[#10b981] border-0 hover:bg-[#10b981]/20', icon: CheckCheck },
@@ -122,7 +122,7 @@ export default function AdminWithdrawals() {
                 >
                   <TableCell>
                     <div className="flex items-center gap-2">
-                      <div className="w-7 h-7 rounded-full bg-[#d4a853]/10 flex items-center justify-center text-xs font-bold text-[#d4a853]">
+                      <div className="w-7 h-7 rounded-full bg-[#d4af37]/10 flex items-center justify-center text-xs font-bold text-[#d4af37]">
                         {w.userName?.charAt(0)?.toUpperCase() || '?'}
                       </div>
                       <span className="font-medium text-sm">{w.userName}</span>
@@ -201,7 +201,7 @@ export default function AdminWithdrawals() {
             <TabsTrigger value="pending" className="gap-2">
               <Clock className="w-3.5 h-3.5" /> Pending
               {withdrawals.filter((w) => w.status === 'pending').length > 0 && (
-                <span className="ml-1 px-1.5 py-0.5 rounded-full bg-[#f59e0b]/15 text-[#f59e0b] text-xs">
+                <span className="ml-1 px-1.5 py-0.5 rounded-full bg-[#ffd700]/15 text-[#ffd700] text-xs">
                   {withdrawals.filter((w) => w.status === 'pending').length}
                 </span>
               )}

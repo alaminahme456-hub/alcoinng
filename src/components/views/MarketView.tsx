@@ -336,7 +336,7 @@ export default function MarketView() {
                 <LineChart data={priceData} margin={{ top: 5, right: 5, left: -20, bottom: 0 }}>
                   <CartesianGrid
                     strokeDasharray="3 3"
-                    stroke="rgba(212, 168, 83, 0.08)"
+                    stroke="rgba(212, 175, 55, 0.08)"
                     vertical={false}
                   />
                   <XAxis
@@ -365,7 +365,7 @@ export default function MarketView() {
                   />
                   <ReferenceLine
                     y={priceData.length > 0 ? priceData[priceData.length - 1]?.price : undefined}
-                    stroke="rgba(212, 168, 83, 0.2)"
+                    stroke="rgba(212, 175, 55, 0.2)"
                     strokeDasharray="3 3"
                   />
                 </LineChart>

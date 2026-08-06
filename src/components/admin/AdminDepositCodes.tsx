@@ -248,7 +248,7 @@ export default function AdminDepositCodes() {
                           <Button
                             size="icon"
                             variant="ghost"
-                            className="h-8 w-8 text-[#f59e0b] hover:text-[#f59e0b] hover:bg-[#f59e0b]/10"
+                            className="h-8 w-8 text-[#ffd700] hover:text-[#ffd700] hover:bg-[#ffd700]/10"
                             onClick={() => setDisableTarget(code)}
                           >
                             <Ban className="w-4 h-4" />

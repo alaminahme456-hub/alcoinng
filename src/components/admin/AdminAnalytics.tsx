@@ -113,7 +113,7 @@ export default function AdminAnalytics() {
   const stats = [
     { label: 'Total Users', value: data.totalUsers.toLocaleString(), icon: Users, colorClass: 'text-[#3b82f6]', bgColor: 'bg-[#3b82f6]/10', borderColor: 'border-[#3b82f6]/20' },
     { label: 'Activated Users', value: data.activatedUsers.toLocaleString(), icon: UserCheck, colorClass: 'text-[#10b981]', bgColor: 'bg-[#10b981]/10', borderColor: 'border-[#10b981]/20' },
-    { label: 'Total Deposits', value: `₦${data.totalDeposits.toLocaleString()}`, icon: TrendingUp, colorClass: 'text-[#d4a853]', bgColor: 'bg-[#d4a853]/10', borderColor: 'border-[#d4a853]/20' },
+    { label: 'Total Deposits', value: `₦${data.totalDeposits.toLocaleString()}`, icon: TrendingUp, colorClass: 'text-[#d4af37]', bgColor: 'bg-[#d4af37]/10', borderColor: 'border-[#d4af37]/20' },
     { label: 'Total Withdrawals', value: `₦${data.totalWithdrawals.toLocaleString()}`, icon: ArrowDownToLine, colorClass: 'text-[#ef4444]', bgColor: 'bg-[#ef4444]/10', borderColor: 'border-[#ef4444]/20' },
     { label: 'Total Revenue', value: `₦${(data.totalRevenue || 0).toLocaleString()}`, icon: DollarSign, colorClass: 'text-[#8b5cf6]', bgColor: 'bg-[#8b5cf6]/10', borderColor: 'border-[#8b5cf6]/20' },
     { label: 'Active Today', value: (data.activeUsersToday || 0).toLocaleString(), icon: Activity, colorClass: 'text-[#06b6d4]', bgColor: 'bg-[#06b6d4]/10', borderColor: 'border-[#06b6d4]/20' },
@@ -186,7 +186,7 @@ export default function AdminAnalytics() {
             className="glass rounded-2xl p-6"
           >
             <div className="flex items-center gap-2 mb-6">
-              <Wallet className="w-5 h-5 text-[#d4a853]" />
+              <Wallet className="w-5 h-5 text-[#d4af37]" />
               <h2 className="text-lg font-semibold">Deposits vs Withdrawals</h2>
             </div>
             {data.depositWithdrawalChart && data.depositWithdrawalChart.length > 0 ? (
@@ -210,7 +210,7 @@ export default function AdminAnalytics() {
                     wrapperStyle={{ paddingTop: 16 }}
                     formatter={(value: string) => <span style={{ color: '#e8e8ed', fontSize: 13 }}>{value}</span>}
                   />
-                  <Bar dataKey="deposits" name="deposits" fill="#d4a853" radius={[4, 4, 0, 0]} barSize={16} />
+                  <Bar dataKey="deposits" name="deposits" fill="#d4af37" radius={[4, 4, 0, 0]} barSize={16} />
                   <Bar dataKey="withdrawals" name="withdrawals" fill="#ef4444" radius={[4, 4, 0, 0]} barSize={16} />
                 </BarChart>
               </ResponsiveContainer>

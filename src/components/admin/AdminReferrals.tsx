@@ -79,7 +79,7 @@ export default function AdminReferrals() {
   const statCards = [
     { label: 'Total Referrals', value: stats?.totalReferrals ?? 0, icon: Share2, color: 'text-[#3b82f6]', bg: 'bg-[#3b82f6]/10', border: 'border-[#3b82f6]/20' },
     { label: 'Converted', value: stats?.convertedReferrals ?? 0, icon: UserPlus, color: 'text-[#10b981]', bg: 'bg-[#10b981]/10', border: 'border-[#10b981]/20' },
-    { label: 'Conversion Rate', value: stats ? `${stats.conversionRate.toFixed(1)}%` : '0%', icon: TrendingUp, color: 'text-[#d4a853]', bg: 'bg-[#d4a853]/10', border: 'border-[#d4a853]/20' },
+    { label: 'Conversion Rate', value: stats ? `${stats.conversionRate.toFixed(1)}%` : '0%', icon: TrendingUp, color: 'text-[#d4af37]', bg: 'bg-[#d4af37]/10', border: 'border-[#d4af37]/20' },
     { label: 'Total Earnings', value: `₦${(stats?.totalReferralEarnings ?? 0).toLocaleString()}`, icon: Award, color: 'text-[#8b5cf6]', bg: 'bg-[#8b5cf6]/10', border: 'border-[#8b5cf6]/20' },
   ];
 
@@ -133,7 +133,7 @@ export default function AdminReferrals() {
         {/* Top Referrers */}
         <div>
           <h2 className="text-lg font-semibold mb-4 flex items-center gap-2">
-            <Award className="w-5 h-5 text-[#d4a853]" />
+            <Award className="w-5 h-5 text-[#d4af37]" />
             Top Referrers
           </h2>
           {loading ? (
@@ -175,7 +175,7 @@ export default function AdminReferrals() {
                       <p className="text-xs text-muted-foreground">Converted</p>
                     </div>
                     <div className="bg-white/[0.03] rounded-xl py-2">
-                      <p className="text-lg font-bold text-[#d4a853]">₦{referrer.totalEarnings.toLocaleString()}</p>
+                      <p className="text-lg font-bold text-[#d4af37]">₦{referrer.totalEarnings.toLocaleString()}</p>
                       <p className="text-xs text-muted-foreground">Earned</p>
                     </div>
                   </div>
@@ -242,7 +242,7 @@ export default function AdminReferrals() {
                           </div>
                         </TableCell>
                         <TableCell>
-                          <ArrowRight className="w-4 h-4 text-[#d4a853] mx-2" />
+                          <ArrowRight className="w-4 h-4 text-[#d4af37] mx-2" />
                         </TableCell>
                         <TableCell>
                           <div>

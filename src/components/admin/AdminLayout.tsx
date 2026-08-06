@@ -77,7 +77,7 @@ function SidebarContent({
                 className={`relative flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium transition-all duration-200 cursor-pointer w-full text-left
                   ${
                     isActive
-                      ? 'text-[#d4a853] gold-glow'
+                      ? 'text-[#d4af37] gold-glow'
                       : 'text-muted-foreground hover:text-foreground hover:bg-white/5'
                   }`
                 }
@@ -85,7 +85,7 @@ function SidebarContent({
                 {isActive && (
                   <motion.div
                     layoutId="admin-nav-active"
-                    className="absolute inset-0 rounded-xl bg-[#d4a853]/10 border border-[#d4a853]/20"
+                    className="absolute inset-0 rounded-xl bg-[#d4af37]/10 border border-[#d4af37]/20"
                     transition={{ type: 'spring', bounce: 0.2, duration: 0.6 }}
                   />
                 )}
