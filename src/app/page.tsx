@@ -5,6 +5,7 @@ import { useAppStore, initializeStore, ViewName } from '@/store';
 import { AnimatePresence, motion } from 'framer-motion';
 
 // User views
+import LandingView from '@/components/views/LandingView';
 import AuthView from '@/components/views/AuthView';
 import DashboardView from '@/components/views/DashboardView';
 import ActivateView from '@/components/views/ActivateView';
@@ -40,6 +41,7 @@ function ViewRouter() {
   const view = useAppStore((s) => s.view);
 
   const views: Record<ViewName, React.ReactNode> = {
+    landing: <LandingView />,
     login: <AuthView />,
     register: <AuthView />,
     'verify-otp': <AuthView />,

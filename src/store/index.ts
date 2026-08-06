@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 
 export type ViewName = 
-  | 'login' | 'register' | 'verify-otp' | 'complete-profile'
+  | 'landing' | 'login' | 'register' | 'verify-otp' | 'complete-profile'
   | 'dashboard' | 'activate' | 'deposit'
   | 'ads' | 'tasks' | 'market' | 'referral' | 'withdraw'
   | 'notifications' | 'profile' | 'settings'
@@ -51,7 +51,7 @@ interface AppState {
 }
 
 export const useAppStore = create<AppState>((set) => ({
-  view: 'login',
+  view: 'landing',
   setView: (v) => set({ view: v }),
   user: null,
   setUser: (u) => set({ user: u }),
@@ -68,7 +68,7 @@ export const useAppStore = create<AppState>((set) => ({
   setSidebarOpen: (o) => set({ sidebarOpen: o }),
   logout: () => {
     sessionGeneration++;
-    set({ user: null, token: null, view: 'login', wallets: { reward: 0, deposit: 0, profit: 0 } });
+    set({ user: null, token: null, view: 'landing', wallets: { reward: 0, deposit: 0, profit: 0 } });
   },
 }));
 
@@ -95,7 +95,7 @@ export function initializeStore() {
           useAppStore.getState().setView('dashboard');
         }
       }
-      // If no user (not authenticated), stay on login view (default)
+      // If no user (not authenticated), stay on landing view (default)
     })
     .catch(() => {
       // Stay on login view
