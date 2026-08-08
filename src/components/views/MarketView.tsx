@@ -277,6 +277,10 @@ function MarketView() {
     };
   }, [generatePriceTick, currentPrice]);
 
+  // Derived values (must be before callbacks that reference them)
+  const availableBalance = wallets[WALLET_CONFIG[selectedWallet].balanceKey];
+  const amountNum = parseFloat(tradeAmount) || 0;
+
   // Trade countdown — pure ref-based, single interval, no re-renders per tick
   const countdownRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const countdownDisplayRef = useRef(0);
@@ -349,9 +353,6 @@ function MarketView() {
       if (countdownRef.current) clearInterval(countdownRef.current);
     };
   }, []);
-
-  const availableBalance = wallets[WALLET_CONFIG[selectedWallet].balanceKey];
-  const amountNum = parseFloat(tradeAmount) || 0;
 
   const formatCountdown = (seconds: number) => {
     const m = Math.floor(seconds / 60);
