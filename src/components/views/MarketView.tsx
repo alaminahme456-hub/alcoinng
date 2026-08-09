@@ -229,7 +229,21 @@ function MarketView() {
     try {
       setHistoryLoading(true);
       const data = await apiFetch('/api/market/history');
-      setHistory(data.trades || []);
+      const rawTrades = data.trades || [];
+      // Map DB columns to frontend interface
+      const mapped: TradeHistoryItem[] = rawTrades.map((t: any) => ({
+        id: t.id,
+        prediction: (t.prediction === 'buy' ? 'UP' : 'DOWN') as 'UP' | 'DOWN',
+        amount: Number(t.amount),
+        multiplier: Number(t.payout_multiplier ?? t.multiplier ?? 1),
+        duration: Number(t.duration),
+        result: t.result as 'win' | 'loss',
+        profit: Number(t.profit ?? 0),
+        createdAt: t.created_at,
+        entryPrice: Number(t.start_price),
+        exitPrice: Number(t.end_price),
+      }));
+      setHistory(mapped);
     } catch {
       // silent
     } finally {
@@ -855,7 +869,7 @@ function MarketView() {
                     </div>
                     <div className="flex justify-between">
                       <span className="text-muted-foreground">Multiplier</span>
-                      <span className="font-medium text-gold">{tradeResult.multiplier.toFixed(2)}x</span>
+                      <span className="font-medium text-gold">{(tradeResult.multiplier ?? 1).toFixed(2)}x</span>
                     </div>
                     <div className="flex justify-between">
                       <span className="text-muted-foreground">Total Return</span>
@@ -975,7 +989,7 @@ function MarketView() {
                         {formatNaira(trade.amount)}
                       </TableCell>
                       <TableCell className="text-xs text-muted-foreground text-right py-2">
-                        {trade.multiplier.toFixed(2)}x
+                        {(trade.multiplier ?? trade.payout_multiplier ?? 1).toFixed(2)}x
                       </TableCell>
                       <TableCell className="text-xs text-muted-foreground text-right py-2">
                         {DURATION_OPTIONS.find((d) => d.value === trade.duration)?.label || `${trade.duration}s`}
