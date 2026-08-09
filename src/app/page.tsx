@@ -30,6 +30,7 @@ import AdminWithdrawals from '@/components/admin/AdminWithdrawals';
 import AdminAnnouncements from '@/components/admin/AdminAnnouncements';
 import AdminAnalytics from '@/components/admin/AdminAnalytics';
 import AdminReferrals from '@/components/admin/AdminReferrals';
+import PwaInstallPrompt from '@/components/PwaInstallPrompt';
 
 const pageVariants = {
   initial: { opacity: 0, y: 8 },
@@ -93,6 +94,7 @@ export default function Home() {
   return (
     <main className="min-h-screen bg-background">
       <ViewRouter />
+      <PwaInstallPrompt />
     </main>
   );
 }
