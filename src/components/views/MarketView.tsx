@@ -38,8 +38,10 @@ import {
   AreaChart,
 } from 'recharts';
 
-function formatNaira(amount: number) {
-  return `\u20a6${amount.toLocaleString()}`;
+function formatNaira(amount: any) {
+  const num = Number(amount);
+  if (isNaN(num)) return '\u20a60';
+  return `\u20a6${num.toLocaleString()}`;
 }
 
 interface PricePoint {
@@ -295,14 +297,13 @@ function MarketView() {
   const availableBalance = wallets[WALLET_CONFIG[selectedWallet].balanceKey];
   const amountNum = parseFloat(tradeAmount) || 0;
 
-  // Trade countdown — pure ref-based, single interval, no re-renders per tick
+  // Trade countdown — ref-based, avoids all stale closure issues
   const countdownRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const countdownDisplayRef = useRef(0);
-  const pendingTradeData = useRef<any>(null);
-  const [, forceUpdate] = useState(0); // used to refresh overlay text
+  const pendingTradeResult = useRef<any>(null);
+  const [, forceUpdate] = useState(0);
 
   const startCountdown = useCallback((seconds: number) => {
-    // Clear any previous
     if (countdownRef.current) {
       clearInterval(countdownRef.current);
       countdownRef.current = null;
@@ -311,17 +312,30 @@ function MarketView() {
 
     countdownRef.current = setInterval(() => {
       countdownDisplayRef.current -= 1;
-      forceUpdate((n) => n + 1); // trigger re-render for overlay text
+      forceUpdate((n) => n + 1);
       if (countdownDisplayRef.current <= 0) {
         if (countdownRef.current) {
           clearInterval(countdownRef.current);
           countdownRef.current = null;
         }
         countdownDisplayRef.current = 0;
-        onCountdownFinished();
+        // Read pre-computed result from ref — no closure dependency on state
+        const result = pendingTradeResult.current;
+        if (result) {
+          pendingTradeResult.current = null;
+          setTradeResult(result);
+          toast.success(
+            result.win ? `Trade Won! +${formatNaira(result.profit)}` : 'Trade Lost',
+            { description: result.message || '' }
+          );
+          setTrading(false);
+          fetchHistory();
+          refreshWallets();
+          forceUpdate((n) => n + 1);
+        }
       }
     }, 1000);
-  }, []);
+  }, [fetchHistory, refreshWallets]);
 
   const stopCountdown = useCallback(() => {
     if (countdownRef.current) {
@@ -330,36 +344,6 @@ function MarketView() {
     }
     countdownDisplayRef.current = 0;
   }, []);
-
-  const onCountdownFinished = useCallback(() => {
-    if (!pendingTradeData.current) return;
-    const data = pendingTradeData.current;
-    pendingTradeData.current = null;
-
-    setTimeout(() => {
-      try {
-        const isWin = data.trade?.result === 'win';
-        const multiplierUsed = data.trade?.payout_multiplier || 1.0;
-        const totalReturn = isWin ? amountNum * multiplierUsed : 0;
-        const profit = isWin ? totalReturn - amountNum : 0;
-
-        setTradeResult({
-          win: isWin, profit, totalReturn, multiplier: multiplierUsed,
-          message: data.message || (isWin ? 'Trade successful!' : 'Better luck next time.'),
-        });
-        toast.success(isWin ? `Trade Won! +${formatNaira(profit)}` : `Trade Lost`,
-          { description: data.message || '' });
-        setTrading(false);
-        refreshWallets();
-        fetchHistory();
-      } catch (e) {
-        console.error('Trade result display error:', e);
-        setTrading(false);
-        setTradeResult(null);
-        toast.error('Trade completed but display failed');
-      }
-    }, 500);
-  }, [amountNum, refreshWallets, fetchHistory]);
 
   // Cleanup on unmount
   useEffect(() => {
@@ -387,7 +371,7 @@ function MarketView() {
     // Clean slate
     setTrading(true);
     setTradeResult(null);
-    pendingTradeData.current = null;
+    pendingTradeResult.current = null;
     stopCountdown();
 
     // Start the visual countdown
@@ -404,28 +388,34 @@ function MarketView() {
         }),
       });
 
-      // Store result — onCountdownFinished will display it when timer hits 0
-      pendingTradeData.current = data;
+      // Pre-compute the display result NOW (while amountNum is current)
+      const isWin = data.trade?.result === 'win';
+      const multiplierUsed = Number(data.trade?.payout_multiplier) || 1.0;
+      const totalReturn = isWin ? Math.round(amountNum * multiplierUsed * 100) / 100 : 0;
+      const profit = isWin ? Math.round((totalReturn - amountNum) * 100) / 100 : 0;
 
-      // If countdown already finished (very fast API + short duration), show now
+      const precomputed = {
+        win: isWin,
+        profit: Number(profit) || 0,
+        totalReturn: Number(totalReturn) || 0,
+        multiplier: Number(multiplierUsed) || 1,
+        message: data.message || (isWin ? 'Trade successful!' : 'Better luck next time.'),
+      };
+
+      // If countdown already finished, show immediately
       if (countdownDisplayRef.current <= 0) {
-        pendingTradeData.current = null;
-        const isWin = data.trade?.result === 'win';
-        const multiplierUsed = data.trade?.payout_multiplier || 1.0;
-        const totalReturn = isWin ? amountNum * multiplierUsed : 0;
-        const profit = isWin ? totalReturn - amountNum : 0;
-        setTradeResult({
-          win: isWin, profit, totalReturn, multiplier: multiplierUsed,
-          message: data.message || (isWin ? 'Trade successful!' : 'Better luck next time.'),
-        });
-        toast.success(isWin ? `Trade Won! +${formatNaira(profit)}` : `Trade Lost`);
+        setTradeResult(precomputed);
+        toast.success(isWin ? `Trade Won! +${formatNaira(profit)}` : 'Trade Lost');
         setTrading(false);
         refreshWallets();
         fetchHistory();
+      } else {
+        // Store pre-computed result for the countdown to pick up
+        pendingTradeResult.current = precomputed;
       }
     } catch (err: any) {
       stopCountdown();
-      pendingTradeData.current = null;
+      pendingTradeResult.current = null;
       setTrading(false);
       toast.error(err.message || 'Trade failed');
     }
@@ -523,7 +513,7 @@ function MarketView() {
                     tick={{ fontSize: 10, fill: '#8888a0' }}
                     axisLine={{ stroke: 'rgba(255,255,255,0.06)' }}
                     tickLine={false}
-                    tickFormatter={(v: number) => `\u20a6${v.toFixed(0)}`}
+                    tickFormatter={(v: any) => v != null ? `\u20a6${Number(v).toFixed(0)}` : ''}
                   />
                   <Tooltip content={<CustomTooltip />} />
                   <Area
