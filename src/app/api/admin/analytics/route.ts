@@ -1,143 +1,79 @@
-import { NextRequest, NextResponse } from 'next/server';
+import { NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabase/admin';
 import { requireAdmin, isAuthUser } from '@/lib/req-helpers';
 
-export async function GET(req: NextRequest) {
+export const maxDuration = 30;
+
+export async function GET() {
   try {
-    const admin = await requireAdmin(req);
+    const admin = await requireAdmin();
     if (!isAuthUser(admin)) return admin;
 
-    // Users
-    const { count: totalUsers } = await supabaseAdmin
-      .from('profiles')
-      .select('*', { count: 'exact', head: true });
+    // Run all independent queries in parallel for speed
+    const [
+      { count: totalUsers },
+      { count: activatedUsers },
+      { count: pendingActivations },
+      { data: rewardRows },
+      { data: depositRows },
+      { data: profitRows },
+      { data: depositCodes },
+      { data: paidWds },
+      { data: pendingWds },
+      { count: pendingWdCount },
+      { count: totalTrades },
+      { count: winningTrades },
+      { count: losingTrades },
+      { data: stakedRows },
+      { data: profitRows2 },
+      { count: activeTasks },
+      { count: pendingSubmissions },
+      { count: activeAds },
+      { count: unusedCodes },
+      { count: usedCodes },
+      { count: unusedDepositCodes },
+      { count: usedDepositCodes },
+      { data: recentUsers },
+    ] = await Promise.all([
+      supabaseAdmin.from('profiles').select('*', { count: 'exact', head: true }),
+      supabaseAdmin.from('profiles').select('*', { count: 'exact', head: true }).eq('is_activated', true),
+      supabaseAdmin.from('profiles').select('*', { count: 'exact', head: true }).eq('is_activated', false),
+      supabaseAdmin.from('wallets').select('balance').eq('type', 'reward'),
+      supabaseAdmin.from('wallets').select('balance').eq('type', 'deposit'),
+      supabaseAdmin.from('wallets').select('balance').eq('type', 'profit'),
+      supabaseAdmin.from('deposit_codes').select('amount').eq('status', 'used'),
+      supabaseAdmin.from('withdrawals').select('amount').eq('status', 'paid'),
+      supabaseAdmin.from('withdrawals').select('amount').eq('status', 'pending'),
+      supabaseAdmin.from('withdrawals').select('*', { count: 'exact', head: true }).eq('status', 'pending'),
+      supabaseAdmin.from('trades').select('*', { count: 'exact', head: true }),
+      supabaseAdmin.from('trades').select('*', { count: 'exact', head: true }).eq('result', 'win'),
+      supabaseAdmin.from('trades').select('*', { count: 'exact', head: true }).eq('result', 'loss'),
+      supabaseAdmin.from('trades').select('amount'),
+      supabaseAdmin.from('trades').select('profit').eq('result', 'win'),
+      supabaseAdmin.from('tasks').select('*', { count: 'exact', head: true }).eq('is_active', true),
+      supabaseAdmin.from('task_submissions').select('*', { count: 'exact', head: true }).eq('status', 'pending'),
+      supabaseAdmin.from('ads').select('*', { count: 'exact', head: true }).eq('is_active', true),
+      supabaseAdmin.from('activation_codes').select('*', { count: 'exact', head: true }).eq('status', 'unused'),
+      supabaseAdmin.from('activation_codes').select('*', { count: 'exact', head: true }).eq('status', 'used'),
+      supabaseAdmin.from('deposit_codes').select('*', { count: 'exact', head: true }).eq('status', 'unused'),
+      supabaseAdmin.from('deposit_codes').select('*', { count: 'exact', head: true }).eq('status', 'used'),
+      supabaseAdmin.from('profiles').select('created_at').gte('created_at', new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString()),
+    ]);
 
-    const { count: activatedUsers } = await supabaseAdmin
-      .from('profiles')
-      .select('*', { count: 'exact', head: true })
-      .eq('is_activated', true);
+    // Aggregate sums
+    const sumField = (rows: any[], field: string) =>
+      (rows || []).reduce((s: number, r: any) => s + Number(r[field] || 0), 0);
 
-    const { count: pendingActivations } = await supabaseAdmin
-      .from('profiles')
-      .select('*', { count: 'exact', head: true })
-      .eq('is_activated', false);
+    const totalDeposits = sumField(depositCodes, 'amount');
+    const totalPaid = sumField(paidWds, 'amount');
+    const pendingAmount = sumField(pendingWds, 'amount');
+    const rewardBalance = sumField(rewardRows, 'balance');
+    const depositBalance = sumField(depositRows, 'balance');
+    const profitBalance = sumField(profitRows, 'balance');
+    const totalStaked = sumField(stakedRows, 'amount');
+    const totalProfitPaid = sumField(profitRows2, 'profit');
 
-    // Wallets
-    const { data: rewardRows } = await supabaseAdmin
-      .from('wallets')
-      .select('balance')
-      .eq('type', 'reward');
-    const rewardBalance = (rewardRows || []).reduce((sum: number, r: any) => sum + Number(r.balance), 0);
-
-    const { data: depositRows } = await supabaseAdmin
-      .from('wallets')
-      .select('balance')
-      .eq('type', 'deposit');
-    const depositBalance = (depositRows || []).reduce((sum: number, r: any) => sum + Number(r.balance), 0);
-
-    const { data: profitRows } = await supabaseAdmin
-      .from('wallets')
-      .select('balance')
-      .eq('type', 'profit');
-    const profitBalance = (profitRows || []).reduce((sum: number, r: any) => sum + Number(r.balance), 0);
-
-    // Deposits
-    const { data: depositCodes } = await supabaseAdmin
-      .from('deposit_codes')
-      .select('amount')
-      .eq('status', 'used');
-    const totalDeposits = (depositCodes || []).reduce((sum: number, r: any) => sum + Number(r.amount), 0);
-
-    // Withdrawals
-    const { data: paidWds } = await supabaseAdmin
-      .from('withdrawals')
-      .select('amount')
-      .eq('status', 'paid');
-    const totalPaid = (paidWds || []).reduce((sum: number, r: any) => sum + Number(r.amount), 0);
-
-    const { data: pendingWds } = await supabaseAdmin
-      .from('withdrawals')
-      .select('amount')
-      .eq('status', 'pending');
-    const pendingAmount = (pendingWds || []).reduce((sum: number, r: any) => sum + Number(r.amount), 0);
-
-    const { count: pendingWdCount } = await supabaseAdmin
-      .from('withdrawals')
-      .select('*', { count: 'exact', head: true })
-      .eq('status', 'pending');
-
-    // Trades
-    const { count: totalTrades } = await supabaseAdmin
-      .from('trades')
-      .select('*', { count: 'exact', head: true });
-
-    const { count: winningTrades } = await supabaseAdmin
-      .from('trades')
-      .select('*', { count: 'exact', head: true })
-      .eq('result', 'win');
-
-    const { count: losingTrades } = await supabaseAdmin
-      .from('trades')
-      .select('*', { count: 'exact', head: true })
-      .eq('result', 'loss');
-
-    const { data: stakedRows } = await supabaseAdmin
-      .from('trades')
-      .select('amount');
-    const totalStaked = (stakedRows || []).reduce((sum: number, r: any) => sum + Number(r.amount), 0);
-
-    const { data: profitRows2 } = await supabaseAdmin
-      .from('trades')
-      .select('profit')
-      .eq('result', 'win');
-    const totalProfitPaid = (profitRows2 || []).reduce((sum: number, r: any) => sum + Number(r.profit), 0);
-
-    // Tasks
-    const { count: activeTasks } = await supabaseAdmin
-      .from('tasks')
-      .select('*', { count: 'exact', head: true })
-      .eq('is_active', true);
-
-    const { count: pendingSubmissions } = await supabaseAdmin
-      .from('task_submissions')
-      .select('*', { count: 'exact', head: true })
-      .eq('status', 'pending');
-
-    // Ads
-    const { count: activeAds } = await supabaseAdmin
-      .from('ads')
-      .select('*', { count: 'exact', head: true })
-      .eq('is_active', true);
-
-    // Activation codes
-    const { count: unusedCodes } = await supabaseAdmin
-      .from('activation_codes')
-      .select('*', { count: 'exact', head: true })
-      .eq('status', 'unused');
-
-    const { count: usedCodes } = await supabaseAdmin
-      .from('activation_codes')
-      .select('*', { count: 'exact', head: true })
-      .eq('status', 'used');
-
-    // Deposit codes
-    const { count: unusedDepositCodes } = await supabaseAdmin
-      .from('deposit_codes')
-      .select('*', { count: 'exact', head: true })
-      .eq('status', 'unused');
-
-    const { count: usedDepositCodes } = await supabaseAdmin
-      .from('deposit_codes')
-      .select('*', { count: 'exact', head: true })
-      .eq('status', 'used');
-
-    // Daily registrations — last 30 days
-    const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
-    const { data: recentUsers } = await supabaseAdmin
-      .from('profiles')
-      .select('created_at')
-      .gte('created_at', thirtyDaysAgo);
-
+    // Daily registrations
     const registrationByDate: Record<string, number> = {};
     for (const u of recentUsers || []) {
       const dateKey = new Date(u.created_at).toISOString().split('T')[0];
@@ -152,8 +88,8 @@ export async function GET(req: NextRequest) {
       },
       deposits: {
         total: totalDeposits,
-        unusedCodes: unusedCodes || 0,
-        usedCodes: usedCodes || 0,
+        unusedCodes: unusedDepositCodes || 0,
+        usedCodes: usedDepositCodes || 0,
       },
       depositsCodes: {
         unused: unusedDepositCodes || 0,
