@@ -27,6 +27,7 @@ import {
   ArrowLeft, TrendingUp, Wallet, PiggyBank, TrendingUpIcon,
   ArrowUpCircle, ArrowDownCircle, Loader2,
   Trophy, XCircle, CheckCircle2, Clock, History, Filter,
+  CheckCircle, ArrowUp, ArrowDown, Home, Eye,
 } from 'lucide-react';
 import {
   XAxis,
@@ -163,7 +164,19 @@ function MarketView() {
 
   // Trade execution
   const [trading, setTrading] = useState(false);
+  const [tradePhase, setTradePhase] = useState<'idle' | 'confirmed' | 'monitoring' | 'result'>('idle');
   const [tradeResult, setTradeResult] = useState<{ win: boolean; profit: number; totalReturn: number; message: string; multiplier: number } | null>(null);
+
+  // Monitor screen data (stored in ref to avoid stale closures)
+  const monitorInfoRef = useRef<{
+    tradeId: string;
+    prediction: 'UP' | 'DOWN';
+    startPrice: number;
+    startTime: number;
+    endTime: number;
+    duration: number;
+    amount: number;
+  } | null>(null);
 
   // History
   const [history, setHistory] = useState<TradeHistoryItem[]>([]);
@@ -302,6 +315,7 @@ function MarketView() {
   const countdownDisplayRef = useRef(0);
   const pendingTradeResult = useRef<any>(null);
   const [, forceUpdate] = useState(0);
+  const tradeStartTimeRef = useRef<number>(0);
 
   const startCountdown = useCallback((seconds: number) => {
     if (countdownRef.current) {
@@ -324,6 +338,7 @@ function MarketView() {
         if (result) {
           pendingTradeResult.current = null;
           setTradeResult(result);
+          setTradePhase('result');
           toast.success(
             result.win ? `Trade Won! +${formatNaira(result.profit)}` : 'Trade Lost',
             { description: result.message || '' }
@@ -370,12 +385,11 @@ function MarketView() {
 
     // Clean slate
     setTrading(true);
+    setTradePhase('confirmed');
     setTradeResult(null);
     pendingTradeResult.current = null;
+    monitorInfoRef.current = null;
     stopCountdown();
-
-    // Start the visual countdown
-    startCountdown(duration);
 
     try {
       const data = await apiFetch('/api/market/trade', {
@@ -402,21 +416,42 @@ function MarketView() {
         message: data.message || (isWin ? 'Trade successful!' : 'Better luck next time.'),
       };
 
-      // If countdown already finished, show immediately
+      // Store monitor info
+      const now = Date.now();
+      const startPrice = Number(data.trade?.start_price) || currentPrice || 80;
+      monitorInfoRef.current = {
+        tradeId: data.trade?.id || `AL${Date.now().toString(36).toUpperCase()}`,
+        prediction: prediction!,
+        startPrice,
+        startTime: now,
+        endTime: now + duration * 1000,
+        duration,
+        amount: amountNum,
+      };
+      tradeStartTimeRef.current = now;
+
+      // If countdown already finished (very fast), show immediately
       if (countdownDisplayRef.current <= 0) {
         setTradeResult(precomputed);
+        setTradePhase('result');
         toast.success(isWin ? `Trade Won! +${formatNaira(profit)}` : 'Trade Lost');
         setTrading(false);
         refreshWallets();
         fetchHistory();
       } else {
-        // Store pre-computed result for the countdown to pick up
+        // Start countdown, transition confirmed → monitoring after 1.5s
+        startCountdown(duration);
+        setTimeout(() => {
+          if (trading) setTradePhase('monitoring');
+        }, 1500);
         pendingTradeResult.current = precomputed;
       }
     } catch (err: any) {
       stopCountdown();
       pendingTradeResult.current = null;
+      monitorInfoRef.current = null;
       setTrading(false);
+      setTradePhase('idle');
       toast.error(err.message || 'Trade failed');
     }
   };
@@ -722,9 +757,9 @@ function MarketView() {
           </Button>
         </motion.div>
 
-        {/* ═══════ Trading Overlay (no multiplier shown) ═══════ */}
+        {/* ═══════ PHASE 1: Trade Successfully Placed ═══════ */}
         <AnimatePresence>
-          {trading && !tradeResult && (
+          {tradePhase === 'confirmed' && (
             <motion.div
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
@@ -732,68 +767,199 @@ function MarketView() {
               className="fixed inset-0 z-50 bg-black/85 backdrop-blur-md flex items-center justify-center p-4"
             >
               <motion.div
-                initial={{ scale: 0.9, opacity: 0 }}
+                initial={{ scale: 0.8, opacity: 0 }}
                 animate={{ scale: 1, opacity: 1 }}
-                exit={{ scale: 0.9, opacity: 0 }}
+                exit={{ scale: 0.8, opacity: 0 }}
                 className="glass-strong rounded-2xl p-8 max-w-sm w-full text-center"
               >
-                <div className={`w-24 h-24 rounded-full mx-auto mb-6 flex items-center justify-center ${
-                  prediction === 'UP' ? 'bg-emerald-500/15' : 'bg-red-500/15'
-                }`}>
-                  <motion.div
-                    animate={{ rotate: 360 }}
-                    transition={{ repeat: Infinity, duration: 2, ease: 'linear' }}
-                    className={`w-20 h-20 rounded-full border-4 border-t-transparent ${
-                      prediction === 'UP' ? 'border-emerald-500/60' : 'border-red-500/60'
-                    }`}
-                  />
-                  {prediction === 'UP' ? (
-                    <ArrowUpCircle className="w-10 h-10 text-emerald-400 absolute" />
-                  ) : (
-                    <ArrowDownCircle className="w-10 h-10 text-red-400 absolute" />
-                  )}
+                <motion.div
+                  initial={{ scale: 0 }}
+                  animate={{ scale: 1 }}
+                  transition={{ type: 'spring', stiffness: 200, delay: 0.1 }}
+                  className="w-20 h-20 rounded-full bg-emerald-500/15 flex items-center justify-center mx-auto mb-5"
+                >
+                  <CheckCircle className="w-10 h-10 text-emerald-400" />
+                </motion.div>
+
+                <motion.h3
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ delay: 0.2 }}
+                  className="text-xl font-bold mb-2"
+                >
+                  Trade Successfully Placed
+                </motion.h3>
+                <motion.p
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ delay: 0.3 }}
+                  className="text-sm text-muted-foreground mb-5"
+                >
+                  Your prediction has been recorded.
+                </motion.p>
+
+                <motion.div
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  transition={{ delay: 0.5 }}
+                  className="flex items-center justify-center gap-2 text-gold text-sm font-medium"
+                >
+                  <Eye className="w-4 h-4" />
+                  <span>Opening Market Monitor...</span>
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                </motion.div>
+              </motion.div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+        {/* ═══════ PHASE 2: Market Monitor ═══════ */}
+        <AnimatePresence>
+          {tradePhase === 'monitoring' && monitorInfoRef.current && (
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="fixed inset-0 z-50 bg-[#09090b] flex flex-col"
+            >
+              {/* Monitor Header */}
+              <div className="glass-strong px-4 py-3 flex items-center justify-between shrink-0">
+                <div className="flex items-center gap-2">
+                  <Eye className="w-4 h-4 text-gold" />
+                  <span className="font-semibold text-sm">TRADE IN PROGRESS</span>
                 </div>
+                <div className="flex items-center gap-1.5">
+                  <div className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+                  <span className="text-[10px] text-emerald-400 font-medium">LIVE</span>
+                </div>
+              </div>
 
-                <h3 className="text-xl font-bold mb-1">Trade in Progress</h3>
-                <p className="text-sm text-muted-foreground mb-6">
-                  Waiting for {DURATION_OPTIONS.find((d) => d.value === duration)?.label || `${duration}s`} to complete...
-                </p>
-
-                <div className="text-6xl font-bold font-mono mb-4">
-                  <span className={prediction === 'UP' ? 'text-emerald-400' : 'text-red-400'}>
+              {/* Monitor Body */}
+              <div className="flex-1 overflow-y-auto px-4 py-4 max-w-lg mx-auto w-full space-y-4">
+                {/* Countdown */}
+                <div className="text-center">
+                  <p className="text-xs text-muted-foreground mb-1 tracking-wider uppercase">Time Remaining</p>
+                  <p className={`text-5xl sm:text-6xl font-bold font-mono ${
+                    monitorInfoRef.current.prediction === 'UP' ? 'text-emerald-400' : 'text-red-400'
+                  }`}>
                     {formatCountdown(Math.max(0, countdownDisplayRef.current))}
-                  </span>
+                  </p>
                 </div>
 
-                <div className="w-full h-1.5 rounded-full bg-white/10 overflow-hidden">
+                {/* Progress Bar */}
+                <div className="w-full h-2 rounded-full bg-white/10 overflow-hidden">
                   <div
-                    className={`h-full rounded-full transition-all duration-500 ${
-                      prediction === 'UP' ? 'bg-emerald-500' : 'bg-red-500'
+                    className={`h-full rounded-full transition-all duration-1000 ${
+                      monitorInfoRef.current.prediction === 'UP' ? 'bg-emerald-500' : 'bg-red-500'
                     }`}
-                    style={{ width: `${Math.max(0, ((duration - Math.max(0, countdownDisplayRef.current)) / duration) * 100)}%` }}
+                    style={{ width: `${Math.max(0, ((monitorInfoRef.current.duration - Math.max(0, countdownDisplayRef.current)) / monitorInfoRef.current.duration) * 100)}%` }}
                   />
                 </div>
 
-                <div className="mt-4 glass rounded-lg p-3 text-sm">
-                  <div className="flex justify-between">
-                    <span className="text-muted-foreground">Investment</span>
-                    <span className="font-semibold">{formatNaira(amountNum)}</span>
-                  </div>
-                  <div className="flex justify-between mt-1">
-                    <span className="text-muted-foreground">Prediction</span>
-                    <span className={`font-semibold ${prediction === 'UP' ? 'text-emerald-400' : 'text-red-400'}`}>
-                      {prediction === 'UP' ? 'BUY' : 'SELL'}
+                {/* Live Chart */}
+                <div className="glass rounded-xl p-3">
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-xs text-muted-foreground">Live Chart</span>
+                    <span className={`text-xs font-medium flex items-center gap-1 ${
+                      currentPrice != null && currentPrice > monitorInfoRef.current.startPrice ? 'text-emerald-400'
+                        : currentPrice != null && currentPrice < monitorInfoRef.current.startPrice ? 'text-red-400' : 'text-gold'
+                    }`}>
+                      {currentPrice != null && currentPrice > monitorInfoRef.current.startPrice ? <ArrowUp className="w-3 h-3" /> : null}
+                      {currentPrice != null && currentPrice < monitorInfoRef.current.startPrice ? <ArrowDown className="w-3 h-3" /> : null}
+                      {currentPrice != null && currentPrice > monitorInfoRef.current.startPrice ? 'Up'
+                        : currentPrice != null && currentPrice < monitorInfoRef.current.startPrice ? 'Down' : 'Neutral'}
                     </span>
                   </div>
+                  <div className="h-36 sm:h-44">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <AreaChart data={priceData} margin={{ top: 5, right: 5, left: -20, bottom: 0 }}>
+                        <defs>
+                          <linearGradient id="monGradUp" x1="0" y1="0" x2="0" y2="1">
+                            <stop offset="0%" stopColor="#34d399" stopOpacity={0.3} />
+                            <stop offset="100%" stopColor="#34d399" stopOpacity={0} />
+                          </linearGradient>
+                          <linearGradient id="monGradDn" x1="0" y1="0" x2="0" y2="1">
+                            <stop offset="0%" stopColor="#f87171" stopOpacity={0.3} />
+                            <stop offset="100%" stopColor="#f87171" stopOpacity={0} />
+                          </linearGradient>
+                        </defs>
+                        <CartesianGrid strokeDasharray="3 3" stroke="rgba(212,175,55,0.08)" vertical={false} />
+                        <XAxis dataKey="time" tick={{ fontSize: 9, fill: '#8888a0' }} axisLine={{ stroke: 'rgba(255,255,255,0.06)' }} tickLine={false} interval="preserveStartEnd" />
+                        <YAxis domain={['auto','auto']} tick={{ fontSize: 9, fill: '#8888a0' }} axisLine={{ stroke: 'rgba(255,255,255,0.06)' }} tickLine={false} tickFormatter={(v: any) => v != null ? Number(v).toFixed(0) : ''} />
+                        <Area
+                          type="monotone" dataKey="price"
+                          stroke={currentPrice != null && currentPrice >= monitorInfoRef.current.startPrice ? '#34d399' : '#f87171'}
+                          strokeWidth={2}
+                          fill={currentPrice != null && currentPrice >= monitorInfoRef.current.startPrice ? 'url(#monGradUp)' : 'url(#monGradDn)'}
+                          dot={false} isAnimationActive={false}
+                        />
+                      </AreaChart>
+                    </ResponsiveContainer>
+                  </div>
                 </div>
-              </motion.div>
+
+                {/* Trade Details */}
+                <div className="glass rounded-xl p-4 space-y-3">
+                  <div className="flex justify-between items-center">
+                    <span className="text-xs text-muted-foreground">Prediction</span>
+                    <span className={`text-sm font-bold flex items-center gap-1.5 ${
+                      monitorInfoRef.current.prediction === 'UP' ? 'text-emerald-400' : 'text-red-400'
+                    }`}>
+                      {monitorInfoRef.current.prediction === 'UP' ? <ArrowUpCircle className="w-4 h-4" /> : <ArrowDownCircle className="w-4 h-4" />}
+                      {monitorInfoRef.current.prediction === 'UP' ? 'BUY' : 'SELL'}
+                    </span>
+                  </div>
+                  <div className="flex justify-between items-center">
+                    <span className="text-xs text-muted-foreground">Starting Value</span>
+                    <span className="text-sm font-mono font-medium">{formatNaira(monitorInfoRef.current.startPrice)}</span>
+                  </div>
+                  <div className="flex justify-between items-center">
+                    <span className="text-xs text-muted-foreground">Current Value</span>
+                    <span className={`text-sm font-mono font-bold ${
+                      currentPrice != null && currentPrice > monitorInfoRef.current.startPrice ? 'text-emerald-400'
+                        : currentPrice != null && currentPrice < monitorInfoRef.current.startPrice ? 'text-red-400' : 'text-foreground'
+                    }`}>
+                      {currentPrice != null ? formatNaira(currentPrice) : '---'}
+                    </span>
+                  </div>
+                  <div className="h-px bg-white/5" />
+                  <div className="flex justify-between items-center">
+                    <span className="text-xs text-muted-foreground">Status</span>
+                    <span className="text-xs font-bold px-2.5 py-1 rounded-full bg-amber-500/15 text-amber-400 border border-amber-500/20">ACTIVE</span>
+                  </div>
+                  <div className="flex justify-between items-center">
+                    <span className="text-xs text-muted-foreground">Trade Start</span>
+                    <span className="text-xs font-mono">{new Date(monitorInfoRef.current.startTime).toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' })}</span>
+                  </div>
+                  <div className="flex justify-between items-center">
+                    <span className="text-xs text-muted-foreground">Trade End</span>
+                    <span className="text-xs font-mono">{new Date(monitorInfoRef.current.endTime).toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' })}</span>
+                  </div>
+                  <div className="flex justify-between items-center">
+                    <span className="text-xs text-muted-foreground">Investment</span>
+                    <span className="text-sm font-medium">{formatNaira(monitorInfoRef.current.amount)}</span>
+                  </div>
+                </div>
+
+                {/* Trade ID */}
+                <p className="text-center text-[10px] text-muted-foreground tracking-wider">Trade #{monitorInfoRef.current.tradeId}</p>
+
+                {/* Back to Dashboard */}
+                <button
+                  onClick={() => { stopCountdown(); pendingTradeResult.current = null; setTrading(false); setTradePhase('idle'); monitorInfoRef.current = null; setView('dashboard'); }}
+                  className="w-full h-11 rounded-xl bg-white/5 border border-white/10 text-sm font-medium flex items-center justify-center gap-2 hover:bg-white/10 transition-colors"
+                >
+                  <Home className="w-4 h-4" />
+                  Back to Dashboard
+                </button>
+              </div>
             </motion.div>
           )}
         </AnimatePresence>
 
         {/* ═══════ Trade Result Overlay (shows final multiplier) ═══════ */}
         <AnimatePresence>
-          {tradeResult && (
+          {tradePhase === 'result' && tradeResult && (
             <motion.div
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
@@ -882,7 +1048,7 @@ function MarketView() {
                 )}
 
                 <Button
-                  onClick={() => { setTradeResult(null); }}
+                  onClick={() => { setTradeResult(null); setTradePhase('idle'); monitorInfoRef.current = null; }}
                   className={`w-full font-semibold h-11 ${
                     tradeResult.win
                       ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 hover:bg-emerald-500/30'
