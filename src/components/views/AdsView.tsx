@@ -9,7 +9,7 @@ import { Badge } from '@/components/ui/badge';
 import { toast } from 'sonner';
 import {
   ArrowLeft, Tv, Clock, Coins, Play, CheckCircle2,
-  Loader2, AlertCircle, TvIcon,
+  Loader2, AlertCircle, TvIcon, Eye,
 } from 'lucide-react';
 
 function formatNaira(amount: number) {
@@ -26,7 +26,7 @@ interface AdItem {
   active: boolean;
 }
 
-type WatchingState = null | { adId: string; remaining: number; total: number };
+type WatchingState = null | { adId: string; remaining: number; total: number; isAdsense?: boolean };
 
 const THUMBNAIL_COLORS = [
   'from-gold/30 to-amber-700/30',
@@ -47,6 +47,25 @@ export default function AdsView() {
   const [watchingTitle, setWatchingTitle] = useState('');
   const [watchingReward, setWatchingReward] = useState(0);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  // AdSense ad state
+  const [adsenseClaimed, setAdsenseClaimed] = useState(false);
+  const [adsenseLoading, setAdsenseLoading] = useState(false);
+  const adsensePushed = useRef(false);
+
+  // Push AdSense ad when overlay is showing
+  useEffect(() => {
+    if (watching?.isAdsense && !adsensePushed.current) {
+      adsensePushed.current = true;
+      try {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        ((window as any).adsbygoogle = (window as any).adsbygoogle || []).push({});
+      } catch {}
+    }
+    if (!watching?.isAdsense) {
+      adsensePushed.current = false;
+    }
+  }, [watching?.isAdsense]);
 
   const fetchAds = useCallback(async () => {
     try {
@@ -105,6 +124,42 @@ export default function AdsView() {
       });
     } catch (err: any) {
       toast.error(err.message || 'Failed to record ad watch');
+    }
+  };
+
+  const startAdsenseWatch = () => {
+    const duration = 10;
+    setWatching({ adId: 'adsense-vid1', remaining: duration, total: duration, isAdsense: true });
+    setWatchingTitle('Sponsored Ad');
+    setWatchingReward(200);
+
+    timerRef.current = setInterval(() => {
+      setWatching((prev) => {
+        if (!prev) return null;
+        const next = prev.remaining - 1;
+        if (next <= 0) {
+          if (timerRef.current) clearInterval(timerRef.current);
+          timerRef.current = null;
+          claimAdsenseReward();
+          return null;
+        }
+        return { ...prev, remaining: next };
+      });
+    }, 1000);
+  };
+
+  const claimAdsenseReward = async () => {
+    try {
+      setAdsenseLoading(true);
+      await apiFetch('/api/ads/claim-adsense', { method: 'POST' });
+      setAdsenseClaimed(true);
+      toast.success(`You earned ₦200!`, {
+        description: 'Reward added to your wallet.',
+      });
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to claim reward');
+    } finally {
+      setAdsenseLoading(false);
     }
   };
 
@@ -181,6 +236,128 @@ export default function AdsView() {
                 <p className="text-xs text-muted-foreground">
                   Don&apos;t close this screen. Reward: {formatNaira(watchingReward)}
                 </p>
+              </motion.div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+        {/* ═══ Google AdSense Sponsored Ad ═══ */}
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="glass rounded-xl overflow-hidden border border-gold/20"
+        >
+          <div className="flex">
+            <div className="w-28 sm:w-36 shrink-0 bg-gradient-to-br from-gold/30 to-amber-700/30 flex items-center justify-center relative">
+              {adsenseClaimed ? (
+                <CheckCircle2 className="w-8 h-8 text-emerald-400" />
+              ) : (
+                <Eye className="w-8 h-8 text-white/80" />
+              )}
+              <div className="absolute bottom-2 left-2 px-2 py-0.5 rounded-md bg-black/60 backdrop-blur-sm text-[10px] text-white flex items-center gap-1">
+                <Clock className="w-3 h-3" />
+                10s
+              </div>
+            </div>
+            <div className="flex-1 p-4 flex flex-col justify-between min-w-0">
+              <div>
+                <div className="flex items-center gap-1.5 mb-1">
+                  <h3 className="font-semibold text-sm truncate">Sponsored Ad</h3>
+                  <Badge variant="secondary" className="bg-gold/10 text-gold border-gold/20 text-[9px] px-1.5 py-0">AD</Badge>
+                </div>
+                <p className="text-xs text-muted-foreground">Watch a short sponsored ad to earn rewards.</p>
+              </div>
+              <div className="flex items-center justify-between mt-3">
+                <Badge
+                  variant="secondary"
+                  className="bg-gold/10 text-gold border-gold/20 text-xs gap-1"
+                >
+                  <Coins className="w-3 h-3" />
+                  ₦200
+                </Badge>
+                <Button
+                  size="sm"
+                  disabled={adsenseClaimed || !!watching || adsenseLoading}
+                  onClick={startAdsenseWatch}
+                  className={`h-9 px-4 text-xs font-semibold min-w-[80px] ${
+                    adsenseClaimed
+                      ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 hover:bg-emerald-500/10'
+                      : 'gradient-gold text-gold-foreground'
+                  }`}
+                >
+                  {adsenseClaimed ? (
+                    <span className="flex items-center gap-1">
+                      <CheckCircle2 className="w-3.5 h-3.5" />
+                      Claimed
+                    </span>
+                  ) : (
+                    <span className="flex items-center gap-1">
+                      <Play className="w-3.5 h-3.5" />
+                      Watch
+                    </span>
+                  )}
+                </Button>
+              </div>
+            </div>
+          </div>
+        </motion.div>
+
+        {/* AdSense ad container (visible during watching overlay) */}
+        <AnimatePresence>
+          {watching && watching.isAdsense && (
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="fixed inset-0 z-50 bg-black/90 backdrop-blur-sm flex flex-col items-center justify-center p-4"
+            >
+              <motion.div
+                initial={{ scale: 0.9, opacity: 0 }}
+                animate={{ scale: 1, opacity: 1 }}
+                exit={{ scale: 0.9, opacity: 0 }}
+                className="glass-strong rounded-2xl p-5 max-w-sm w-full"
+              >
+                <div className="flex items-center justify-between mb-3">
+                  <div className="flex items-center gap-2">
+                    <Eye className="w-4 h-4 text-gold" />
+                    <span className="font-semibold text-sm">Sponsored Ad</span>
+                    <Badge variant="secondary" className="bg-gold/10 text-gold border-gold/20 text-[9px] px-1.5 py-0">AD</Badge>
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    <div className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+                    <span className="text-[10px] text-emerald-400 font-medium">LIVE</span>
+                  </div>
+                </div>
+
+                {/* AdSense Ad Slot */}
+                <div className="rounded-xl overflow-hidden bg-white/5 border border-white/10 mb-3 min-h-[250px] flex items-center justify-center">
+                  <ins
+                    className="adsbygoogle"
+                    style={{ display: 'block' }}
+                    data-ad-client="ca-pub-9016878264107871"
+                    data-ad-slot="6973333921"
+                    data-ad-format="auto"
+                    data-full-width-responsive="true"
+                  />
+                </div>
+
+                {/* Timer + Progress */}
+                <div className="text-center mb-2">
+                  <p className="text-3xl font-bold gradient-gold-text font-mono">
+                    {formatTime(watching.remaining)}
+                  </p>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    Reward: <span className="text-gold font-medium">₦200</span>
+                  </p>
+                </div>
+
+                <div className="w-full h-2 rounded-full bg-white/10 overflow-hidden">
+                  <motion.div
+                    className="h-full gradient-gold rounded-full"
+                    animate={{ width: `${((watching.total - watching.remaining) / watching.total) * 100}%` }}
+                    transition={{ duration: 0.3 }}
+                  />
+                </div>
               </motion.div>
             </motion.div>
           )}
