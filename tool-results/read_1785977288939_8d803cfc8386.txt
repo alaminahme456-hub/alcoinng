@@ -1,0 +1,894 @@
+     1→     1→'use client';
+     2→     2→
+     3→     3→import { useEffect, useState, useCallback, useRef } from 'react';
+     4→     4→import { motion, AnimatePresence } from 'framer-motion';
+     5→     5→import { useAppStore, apiFetch } from '@/store';
+     6→     6→import { Button } from '@/components/ui/button';
+     7→     7→import { Input } from '@/components/ui/input';
+     8→     8→import { Badge } from '@/components/ui/badge';
+     9→     9→import { Skeleton } from '@/components/ui/skeleton';
+    10→    10→import {
+    11→    11→  Select,
+    12→    12→  SelectContent,
+    13→    13→  SelectItem,
+    14→    14→  SelectTrigger,
+    15→    15→  SelectValue,
+    16→    16→} from '@/components/ui/select';
+    17→    17→import {
+    18→    18→  Table,
+    19→    19→  TableBody,
+    20→    20→  TableCell,
+    21→    21→  TableHead,
+    22→    22→  TableHeader,
+    23→    23→  TableRow,
+    24→    24→} from '@/components/ui/table';
+    25→    25→import { toast } from 'sonner';
+    26→    26→import {
+    27→    27→  ArrowLeft, TrendingUp, Wallet, PiggyBank, TrendingUpIcon,
+    28→    28→  ArrowUpCircle, ArrowDownCircle, Loader2, AlertCircle,
+    29→    29→  Trophy, XCircle, CheckCircle2, Clock, History, Filter,
+    30→    30→} from 'lucide-react';
+    31→    31→import {
+    32→    32→  LineChart,
+    33→    33→  Line,
+    34→    34→  XAxis,
+    35→    35→  YAxis,
+    36→    36→  CartesianGrid,
+    37→    37→  Tooltip,
+    38→    38→  ResponsiveContainer,
+    39→    39→  ReferenceLine,
+    40→    40→} from 'recharts';
+    41→    41→
+    42→    42→function formatNaira(amount: number) {
+    43→    43→  return `\u20a6${amount.toLocaleString()}`;
+    44→    44→}
+    45→    45→
+    46→    46→interface PricePoint {
+    47→    47→  time: string;
+    48→    48→  price: number;
+    49→    49→  timestamp: number;
+    50→    50→}
+    51→    51→
+    52→    52→interface TradeHistoryItem {
+    53→    53→  id: string;
+    54→    54→  prediction: 'UP' | 'DOWN';
+    55→    55→  amount: number;
+    56→    56→  multiplier: number;
+    57→    57→  duration: number;
+    58→    58→  result: 'win' | 'loss';
+    59→    59→  profit: number;
+    60→    60→  createdAt: string;
+    61→    61→  entryPrice: number;
+    62→    62→  exitPrice: number;
+    63→    63→}
+    64→    64→
+    65→    65→type WalletType = 'reward' | 'deposit' | 'profit';
+    66→    66→type Prediction = 'UP' | 'DOWN' | null;
+    67→    67→
+    68→    68→const DURATION_OPTIONS = [
+    69→    69→  { label: '10s', value: 10 },
+    70→    70→  { label: '30s', value: 30 },
+    71→    71→  { label: '1min', value: 60 },
+    72→    72→  { label: '2min', value: 120 },
+    73→    73→  { label: '5min', value: 300 },
+    74→    74→  { label: '10min', value: 600 },
+    75→    75→];
+    76→    76→
+    77→    77→const MULTIPLIER_OPTIONS = [
+    78→    78→  { label: '1.10x', value: 1.10 },
+    79→    79→  { label: '1.20x', value: 1.20 },
+    80→    80→  { label: '1.30x', value: 1.30 },
+    81→    81→  { label: '1.40x', value: 1.40 },
+    82→    82→  { label: '1.50x', value: 1.50 },
+    83→    83→];
+    84→    84→
+    85→    85→const WALLET_CONFIG: Record<WalletType, { label: string; icon: typeof Wallet; color: string; balanceKey: 'reward' | 'deposit' | 'profit' }> = {
+    86→    86→  reward: { label: 'Reward', icon: Wallet, color: 'text-gold', balanceKey: 'reward' },
+    87→    87→  deposit: { label: 'Deposit', icon: PiggyBank, color: 'text-alcoin-blue', balanceKey: 'deposit' },
+    88→    88→  profit: { label: 'Profit', icon: TrendingUpIcon, color: 'text-emerald-400', balanceKey: 'profit' },
+    89→    89→};
+    90→    90→
+    91→    91→const HISTORY_FILTERS = [
+    92→    92→  { label: 'All', value: 'all' },
+    93→    93→  { label: 'Wins', value: 'win' },
+    94→    94→  { label: 'Losses', value: 'loss' },
+    95→    95→];
+    96→    96→
+    97→    97→export default function MarketView() {
+    98→    98→  const { wallets, setWallets, setView } = useAppStore();
+    99→    99→
+   100→   100→  // Chart data
+   101→   101→  const [priceData, setPriceData] = useState<PricePoint[]>([]);
+   102→   102→  const [currentPrice, setCurrentPrice] = useState<number | null>(null);
+   103→   103→  const [prevPrice, setPrevPrice] = useState<number | null>(null);
+   104→   104→  const [chartLoading, setChartLoading] = useState(true);
+   105→   105→  const priceIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+   106→   106→
+   107→   107→  // Trade form
+   108→   108→  const [selectedWallet, setSelectedWallet] = useState<WalletType>('deposit');
+   109→   109→  const [prediction, setPrediction] = useState<Prediction>(null);
+   110→   110→  const [tradeAmount, setTradeAmount] = useState('');
+   111→   111→  const [duration, setDuration] = useState<number>(30);
+   112→   112→  const [multiplier, setMultiplier] = useState<number>(1.20);
+   113→   113→
+   114→   114→  // Trade execution
+   115→   115→  const [trading, setTrading] = useState(false);
+   116→   116→  const [tradeCountdown, setTradeCountdown] = useState<number | null>(null);
+   117→   117→  const [tradeResult, setTradeResult] = useState<{ win: boolean; profit: number; message: string } | null>(null);
+   118→   118→
+   119→   119→  // History
+   120→   120→  const [history, setHistory] = useState<TradeHistoryItem[]>([]);
+   121→   121→  const [historyLoading, setHistoryLoading] = useState(true);
+   122→   122→  const [historyFilter, setHistoryFilter] = useState('all');
+   123→   123→
+   124→   124→  const fetchPrice = useCallback(async () => {
+   125→   125→    try {
+   126→   126→      const data = await apiFetch('/api/market/price');
+   127→   127→      if (data.price !== undefined) {
+   128→   128→        setPrevPrice(currentPrice);
+   129→   129→        setCurrentPrice(data.price);
+   130→   130→        if (data.history && Array.isArray(data.history)) {
+   131→   131→          setPriceData(data.history.slice(-60));
+   132→   132→        } else if (data.time) {
+   133→   133→          setPriceData((prev) => {
+   134→   134→            const next = [...prev, { time: data.time, price: data.price, timestamp: Date.now() }];
+   135→   135→            return next.slice(-60);
+   136→   136→          });
+   137→   137→        }
+   138→   138→      }
+   139→   139→      setChartLoading(false);
+   140→   140→    } catch {
+   141→   141→      if (chartLoading) setChartLoading(false);
+   142→   142→    }
+   143→   143→  }, [currentPrice, chartLoading]);
+   144→   144→
+   145→   145→  const fetchHistory = useCallback(async () => {
+   146→   146→    try {
+   147→   147→      setHistoryLoading(true);
+   148→   148→      const data = await apiFetch('/api/market/history');
+   149→   149→      setHistory(data.trades || []);
+   150→   150→    } catch {
+   151→   151→      // silent
+   152→   152→    } finally {
+   153→   153→      setHistoryLoading(false);
+   154→   154→    }
+   155→   155→  }, []);
+   156→   156→
+   157→   157→  const refreshWallets = useCallback(async () => {
+   158→   158→    try {
+   159→   159→      const data = await apiFetch('/api/user/wallets');
+   160→   160→      if (data) {
+   161→   161→        const getBal = (w: any) => typeof w === 'object' && w !== null ? (w.balance ?? 0) : (w ?? 0);
+   162→   162→        setWallets({ reward: getBal(data.reward), deposit: getBal(data.deposit), profit: getBal(data.profit) });
+   163→   163→      }
+   164→   164→    } catch {
+   165→   165→      // silent
+   166→   166→    }
+   167→   167→  }, [setWallets]);
+   168→   168→
+   169→   169→  // Initial fetch
+   170→   170→  useEffect(() => {
+   171→   171→    fetchPrice();
+   172→   172→    fetchHistory();
+   173→   173→  }, [fetchPrice, fetchHistory]);
+   174→   174→
+   175→   175→  // Poll price every 2s
+   176→   176→  useEffect(() => {
+   177→   177→    priceIntervalRef.current = setInterval(fetchPrice, 2000);
+   178→   178→    return () => {
+   179→   179→      if (priceIntervalRef.current) clearInterval(priceIntervalRef.current);
+   180→   180→    };
+   181→   181→  }, [fetchPrice]);
+   182→   182→
+   183→   183→  // Trade countdown
+   184→   184→  const countdownRef = useRef<ReturnType<typeof setInterval> | null>(null);
+   185→   185→
+   186→   186→  useEffect(() => {
+   187→   187→    if (tradeCountdown === null) return;
+   188→   188→
+   189→   189→    countdownRef.current = setInterval(() => {
+   190→   190→      setTradeCountdown((prev) => {
+   191→   191→        if (prev === null || prev <= 1) {
+   192→   192→          if (countdownRef.current) clearInterval(countdownRef.current);
+   193→   193→          return 0;
+   194→   194→        }
+   195→   195→        return prev - 1;
+   196→   196→      });
+   197→   197→    }, 1000);
+   198→   198→
+   199→   199→    return () => {
+   200→   200→      if (countdownRef.current) clearInterval(countdownRef.current);
+   201→   201→    };
+   202→   202→  }, [tradeCountdown]);
+   203→   203→
+   204→   204→  const availableBalance = wallets[WALLET_CONFIG[selectedWallet].balanceKey];
+   205→   205→  const amountNum = parseFloat(tradeAmount) || 0;
+   206→   206→  const estimatedProfit = prediction && amountNum > 0
+   207→   207→    ? amountNum * multiplier - amountNum
+   208→   208→    : 0;
+   209→   209→
+   210→   210→  const formatCountdown = (seconds: number) => {
+   211→   211→    const m = Math.floor(seconds / 60);
+   212→   212→    const s = seconds % 60;
+   213→   213→    if (m > 0) return `${m}:${s.toString().padStart(2, '0')}`;
+   214→   214→    return `0:${s.toString().padStart(2, '0')}`;
+   215→   215→  };
+   216→   216→
+   217→   217→  const handleTrade = async () => {
+   218→   218→    if (!prediction || amountNum <= 0) return;
+   219→   219→    if (amountNum > availableBalance) {
+   220→   220→      toast.error('Insufficient balance', {
+   221→   221→        description: `Your ${WALLET_CONFIG[selectedWallet].label} wallet has ${formatNaira(availableBalance)}`,
+   222→   222→      });
+   223→   223→      return;
+   224→   224→    }
+   225→   225→
+   226→   226→    setTrading(true);
+   227→   227→    setTradeResult(null);
+   228→   228→    setTradeCountdown(duration);
+   229→   229→
+   230→   230→    try {
+   231→   231→      const data = await apiFetch('/api/market/trade', {
+   232→   232→        method: 'POST',
+   233→   233→        body: JSON.stringify({
+   234→   234→          wallet: selectedWallet,
+   235→   235→          prediction,
+   236→   236→          amount: amountNum,
+   237→   237→          duration,
+   238→   238→          multiplier,
+   239→   239→        }),
+   240→   240→      });
+   241→   241→
+   242→   242→      setTradeCountdown(0);
+   243→   243→
+   244→   244→      // Small delay for dramatic effect
+   245→   245→      await new Promise((r) => setTimeout(r, 400));
+   246→   246→
+   247→   247→      setTradeResult({
+   248→   248→        win: data.result === 'win',
+   249→   249→        profit: data.profit || 0,
+   250→   250→        message: data.message || (data.result === 'win' ? 'Trade successful!' : 'Better luck next time.'),
+   251→   251→      });
+   252→   252→
+   253→   253→      toast.success(
+   254→   254→        data.result === 'win'
+   255→   255→          ? `Trade Won! +${formatNaira(data.profit || 0)}`
+   256→   256→          : `Trade Lost`,
+   257→   257→        {
+   258→   258→          description: data.message || '',
+   259→   259→        }
+   260→   260→      );
+   261→   261→
+   262→   262→      refreshWallets();
+   263→   263→      fetchHistory();
+   264→   264→    } catch (err: any) {
+   265→   265→      setTradeCountdown(null);
+   266→   266→      toast.error(err.message || 'Trade failed');
+   267→   267→    } finally {
+   268→   268→      setTrading(false);
+   269→   269→    }
+   270→   270→  };
+   271→   271→
+   272→   272→  const filteredHistory = historyFilter === 'all'
+   273→   273→    ? history
+   274→   274→    : history.filter((t) => t.result === historyFilter);
+   275→   275→
+   276→   276→  // Custom chart tooltip
+   277→   277→  const CustomTooltip = ({ active, payload }: any) => {
+   278→   278→    if (active && payload && payload.length) {
+   279→   279→      return (
+   280→   280→        <div className="glass-strong rounded-lg p-2 text-xs border border-white/10">
+   281→   281→          <p className="text-muted-foreground">{payload[0].payload.time}</p>
+   282→   282→          <p className="font-semibold text-gold">{formatNaira(payload[0].value)}</p>
+   283→   283→        </div>
+   284→   284→      );
+   285→   285→    }
+   286→   286→    return null;
+   287→   287→  };
+   288→   288→
+   289→   289→  const priceChange = prevPrice !== null && currentPrice !== null
+   290→   290→    ? currentPrice - prevPrice
+   291→   291→    : 0;
+   292→   292→  const priceUp = priceChange >= 0;
+   293→   293→
+   294→   294→  return (
+   295→   295→    <div className="min-h-screen pb-8">
+   296→   296→      {/* Header */}
+   297→   297→      <header className="sticky top-0 z-30 glass-strong px-4 py-3 flex items-center gap-3">
+   298→   298→        <button
+   299→   299→          onClick={() => setView('dashboard')}
+   300→   300→          className="w-10 h-10 rounded-xl glass flex items-center justify-center hover:bg-white/10 transition-colors"
+   301→   301→        >
+   302→   302→          <ArrowLeft className="w-5 h-5" />
+   303→   303→        </button>
+   304→   304→        <div className="flex items-center gap-2">
+   305→   305→          <div className="w-8 h-8 rounded-lg gradient-gold flex items-center justify-center">
+   306→   306→            <TrendingUp className="w-4 h-4 text-gold-foreground" />
+   307→   307→          </div>
+   308→   308→          <h1 className="font-semibold text-lg">AL Coin Market</h1>
+   309→   309→        </div>
+   310→   310→      </header>
+   311→   311→
+   312→   312→      <main className="px-4 pt-4 max-w-2xl mx-auto space-y-4">
+   313→   313→        {/* Price Chart */}
+   314→   314→        <motion.div
+   315→   315→          initial={{ opacity: 0, y: 20 }}
+   316→   316→          animate={{ opacity: 1, y: 0 }}
+   317→   317→          className="glass rounded-xl p-4"
+   318→   318→        >
+   319→   319→          <div className="flex items-center justify-between mb-3">
+   320→   320→            <h2 className="text-sm font-semibold text-muted-foreground">Live Price Chart</h2>
+   321→   321→            <div className="flex items-center gap-1.5">
+   322→   322→              <div className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+   323→   323→              <span className="text-[10px] text-muted-foreground">LIVE</span>
+   324→   324→            </div>
+   325→   325→          </div>
+   326→   326→
+   327→   327→          {chartLoading ? (
+   328→   328→            <Skeleton className="h-48 rounded-lg bg-white/5" />
+   329→   329→          ) : priceData.length === 0 ? (
+   330→   330→            <div className="h-48 rounded-lg bg-white/5 flex items-center justify-center">
+   331→   331→              <p className="text-sm text-muted-foreground">Waiting for price data...</p>
+   332→   332→            </div>
+   333→   333→          ) : (
+   334→   334→            <div className="h-48 sm:h-56">
+   335→   335→              <ResponsiveContainer width="100%" height="100%">
+   336→   336→                <LineChart data={priceData} margin={{ top: 5, right: 5, left: -20, bottom: 0 }}>
+   337→   337→                  <CartesianGrid
+   338→   338→                    strokeDasharray="3 3"
+   339→   339→                    stroke="rgba(212, 175, 55, 0.08)"
+   340→   340→                    vertical={false}
+   341→   341→                  />
+   342→   342→                  <XAxis
+   343→   343→                    dataKey="time"
+   344→   344→                    tick={{ fontSize: 10, fill: '#8888a0' }}
+   345→   345→                    axisLine={{ stroke: 'rgba(255,255,255,0.06)' }}
+   346→   346→                    tickLine={false}
+   347→   347→                    interval="preserveStartEnd"
+   348→   348→                  />
+   349→   349→                  <YAxis
+   350→   350→                    domain={['auto', 'auto']}
+   351→   351→                    tick={{ fontSize: 10, fill: '#8888a0' }}
+   352→   352→                    axisLine={false}
+   353→   353→                    tickLine={false}
+   354→   354→                    width={50}
+   355→   355→                    tickFormatter={(v) => `₦${v.toLocaleString()}`}
+   356→   356→                  />
+   357→   357→                  <Tooltip content={<CustomTooltip />} />
+   358→   358→                  <Line
+   359→   359→                    type="monotone"
+   360→   360→                    dataKey="price"
+   361→   361→                    stroke={priceUp ? '#10b981' : '#ef4444'}
+   362→   362→                    strokeWidth={2}
+   363→   363→                    dot={false}
+   364→   364→                    activeDot={{ r: 4, fill: priceUp ? '#10b981' : '#ef4444', strokeWidth: 0 }}
+   365→   365→                  />
+   366→   366→                  <ReferenceLine
+   367→   367→                    y={priceData.length > 0 ? priceData[priceData.length - 1]?.price : undefined}
+   368→   368→                    stroke="rgba(212, 175, 55, 0.2)"
+   369→   369→                    strokeDasharray="3 3"
+   370→   370→                  />
+   371→   371→                </LineChart>
+   372→   372→              </ResponsiveContainer>
+   373→   373→            </div>
+   374→   374→          )}
+   375→   375→        </motion.div>
+   376→   376→
+   377→   377→        {/* Current Price */}
+   378→   378→        <motion.div
+   379→   379→          initial={{ opacity: 0, y: 20 }}
+   380→   380→          animate={{ opacity: 1, y: 0 }}
+   381→   381→          transition={{ delay: 0.05 }}
+   382→   382→          className="glass rounded-xl p-4 text-center gold-glow"
+   383→   383→        >
+   384→   384→          <p className="text-xs text-muted-foreground mb-1">AL Coin Current Price</p>
+   385→   385→          <AnimatePresence mode="wait">
+   386→   386→            <motion.p
+   387→   387→              key={currentPrice}
+   388→   388→              initial={{ opacity: 0, y: 5 }}
+   389→   389→              animate={{ opacity: 1, y: 0 }}
+   390→   390→              exit={{ opacity: 0, y: -5 }}
+   391→   391→              className={`text-3xl sm:text-4xl font-bold font-mono ${
+   392→   392→                priceUp ? 'text-emerald-400' : priceChange !== 0 ? 'text-red-400' : 'gradient-gold-text'
+   393→   393→              }`}
+   394→   394→            >
+   395→   395→              {currentPrice !== null ? formatNaira(currentPrice) : '---'}
+   396→   396→            </motion.p>
+   397→   397→          </AnimatePresence>
+   398→   398→          {priceChange !== 0 && (
+   399→   399→            <p className={`text-xs mt-1 font-medium ${priceUp ? 'text-emerald-400' : 'text-red-400'}`}>
+   400→   400→              {priceUp ? '▲' : '▼'} {priceUp ? '+' : ''}{formatNaira(Math.abs(priceChange))}
+   401→   401→            </p>
+   402→   402→          )}
+   403→   403→        </motion.div>
+   404→   404→
+   405→   405→        {/* Trade Form */}
+   406→   406→        <motion.div
+   407→   407→          initial={{ opacity: 0, y: 20 }}
+   408→   408→          animate={{ opacity: 1, y: 0 }}
+   409→   409→          transition={{ delay: 0.1 }}
+   410→   410→          className="glass rounded-xl p-4 space-y-4"
+   411→   411→        >
+   412→   412→          <h2 className="font-semibold text-sm">Place Trade</h2>
+   413→   413→
+   414→   414→          {/* Wallet Selector */}
+   415→   415→          <div className="space-y-2">
+   416→   416→            <p className="text-xs text-muted-foreground">Select Wallet</p>
+   417→   417→            <div className="grid grid-cols-3 gap-2">
+   418→   418→              {(Object.keys(WALLET_CONFIG) as WalletType[]).map((key) => {
+   419→   419→                const cfg = WALLET_CONFIG[key];
+   420→   420→                const isSelected = selectedWallet === key;
+   421→   421→                const bal = wallets[cfg.balanceKey];
+   422→   422→
+   423→   423→                return (
+   424→   424→                  <button
+   425→   425→                    key={key}
+   426→   426→                    onClick={() => setSelectedWallet(key)}
+   427→   427→                    className={`rounded-xl p-3 text-center transition-all border ${
+   428→   428→                      isSelected
+   429→   429→                        ? 'glass-strong border-gold/40 gold-glow'
+   430→   430→                        : 'glass border-transparent hover:border-white/10'
+   431→   431→                    }`}
+   432→   432→                  >
+   433→   433→                    <cfg.icon className={`w-4 h-4 mx-auto mb-1 ${cfg.color}`} />
+   434→   434→                    <p className={`text-xs font-medium ${isSelected ? cfg.color : 'text-muted-foreground'}`}>
+   435→   435→                      {cfg.label}
+   436→   436→                    </p>
+   437→   437→                    <p className={`text-xs font-bold mt-0.5 ${isSelected ? cfg.color : 'text-foreground'}`}>
+   438→   438→                      {formatNaira(bal)}
+   439→   439→                    </p>
+   440→   440→                  </button>
+   441→   441→                );
+   442→   442→              })}
+   443→   443→            </div>
+   444→   444→          </div>
+   445→   445→
+   446→   446→          {/* Prediction */}
+   447→   447→          <div className="space-y-2">
+   448→   448→            <p className="text-xs text-muted-foreground">Prediction</p>
+   449→   449→            <div className="grid grid-cols-2 gap-3">
+   450→   450→              <motion.button
+   451→   451→                whileTap={{ scale: 0.97 }}
+   452→   452→                onClick={() => setPrediction(prediction === 'UP' ? null : 'UP')}
+   453→   453→                className={`rounded-xl p-4 flex flex-col items-center gap-2 transition-all border-2 min-h-[72px] ${
+   454→   454→                  prediction === 'UP'
+   455→   455→                    ? 'bg-emerald-500/15 border-emerald-500/50'
+   456→   456→                    : 'glass border-transparent hover:border-emerald-500/20'
+   457→   457→                }`}
+   458→   458→              >
+   459→   459→                <ArrowUpCircle className={`w-7 h-7 ${prediction === 'UP' ? 'text-emerald-400' : 'text-muted-foreground'}`} />
+   460→   460→                <span className={`text-sm font-bold ${prediction === 'UP' ? 'text-emerald-400' : 'text-muted-foreground'}`}>
+   461→   461→                  BUY (UP)
+   462→   462→                </span>
+   463→   463→              </motion.button>
+   464→   464→
+   465→   465→              <motion.button
+   466→   466→                whileTap={{ scale: 0.97 }}
+   467→   467→                onClick={() => setPrediction(prediction === 'DOWN' ? null : 'DOWN')}
+   468→   468→                className={`rounded-xl p-4 flex flex-col items-center gap-2 transition-all border-2 min-h-[72px] ${
+   469→   469→                  prediction === 'DOWN'
+   470→   470→                    ? 'bg-red-500/15 border-red-500/50'
+   471→   471→                    : 'glass border-transparent hover:border-red-500/20'
+   472→   472→                }`}
+   473→   473→              >
+   474→   474→                <ArrowDownCircle className={`w-7 h-7 ${prediction === 'DOWN' ? 'text-red-400' : 'text-muted-foreground'}`} />
+   475→   475→                <span className={`text-sm font-bold ${prediction === 'DOWN' ? 'text-red-400' : 'text-muted-foreground'}`}>
+   476→   476→                  SELL (DOWN)
+   477→   477→                </span>
+   478→   478→              </motion.button>
+   479→   479→            </div>
+   480→   480→          </div>
+   481→   481→
+   482→   482→          {/* Investment Amount */}
+   483→   483→          <div className="space-y-2">
+   484→   484→            <p className="text-xs text-muted-foreground">Investment Amount</p>
+   485→   485→            <div className="relative">
+   486→   486→              <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-muted-foreground font-medium">
+   487→   487→                ₦
+   488→   488→              </span>
+   489→   489→              <Input
+   490→   490→                type="number"
+   491→   491→                inputMode="decimal"
+   492→   492→                placeholder="0"
+   493→   493→                value={tradeAmount}
+   494→   494→                onChange={(e) => setTradeAmount(e.target.value)}
+   495→   495→                className="pl-8 pr-16 bg-white/5 border-white/10 focus:border-gold h-12 text-lg font-semibold"
+   496→   496→                min="0"
+   497→   497→                max={availableBalance}
+   498→   498→              />
+   499→   499→              <button
+   500→   500→                type="button"
+   501→   501→                onClick={() => setTradeAmount(availableBalance.toString())}
+   502→   502→                className="absolute right-2 top-1/2 -translate-y-1/2 px-2 py-1 rounded text-[10px] font-medium text-gold bg-gold/10 hover:bg-gold/20 transition-colors"
+   503→   503→              >
+   504→   504→                MAX
+   505→   505→              </button>
+   506→   506→            </div>
+   507→   507→            {/* Quick amounts */}
+   508→   508→            <div className="flex gap-2">
+   509→   509→              {[100, 500, 1000, 2000, 5000].map((amt) => (
+   510→   510→                <button
+   511→   511→                  key={amt}
+   512→   512→                  onClick={() => setTradeAmount(amt.toString())}
+   513→   513→                  className="flex-1 glass rounded-lg py-1.5 text-[10px] font-medium text-muted-foreground hover:text-foreground hover:bg-white/8 transition-colors"
+   514→   514→                >
+   515→   515→                  {amt >= 1000 ? `${amt / 1000}K` : amt}
+   516→   516→                </button>
+   517→   517→              ))}
+   518→   518→            </div>
+   519→   519→          </div>
+   520→   520→
+   521→   521→          {/* Duration & Multiplier Row */}
+   522→   522→          <div className="grid grid-cols-2 gap-3">
+   523→   523→            <div className="space-y-2">
+   524→   524→              <p className="text-xs text-muted-foreground">Duration</p>
+   525→   525→              <Select
+   526→   526→                value={duration.toString()}
+   527→   527→                onValueChange={(v) => setDuration(parseInt(v))}
+   528→   528→              >
+   529→   529→                <SelectTrigger className="w-full bg-white/5 border-white/10 focus:border-gold h-11">
+   530→   530→                  <SelectValue />
+   531→   531→                </SelectTrigger>
+   532→   532→                <SelectContent className="glass-strong border-white/10">
+   533→   533→                  {DURATION_OPTIONS.map((opt) => (
+   534→   534→                    <SelectItem key={opt.value} value={opt.value.toString()}>
+   535→   535→                      {opt.label}
+   536→   536→                    </SelectItem>
+   537→   537→                  ))}
+   538→   538→                </SelectContent>
+   539→   539→              </Select>
+   540→   540→            </div>
+   541→   541→
+   542→   542→            <div className="space-y-2">
+   543→   543→              <p className="text-xs text-muted-foreground">Multiplier</p>
+   544→   544→              <Select
+   545→   545→                value={multiplier.toString()}
+   546→   546→                onValueChange={(v) => setMultiplier(parseFloat(v))}
+   547→   547→              >
+   548→   548→                <SelectTrigger className="w-full bg-white/5 border-white/10 focus:border-gold h-11">
+   549→   549→                  <SelectValue />
+   550→   550→                </SelectTrigger>
+   551→   551→                <SelectContent className="glass-strong border-white/10">
+   552→   552→                  {MULTIPLIER_OPTIONS.map((opt) => (
+   553→   553→                    <SelectItem key={opt.value} value={opt.value.toString()}>
+   554→   554→                      {opt.label}
+   555→   555→                    </SelectItem>
+   556→   556→                  ))}
+   557→   557→                </SelectContent>
+   558→   558→              </Select>
+   559→   559→            </div>
+   560→   560→          </div>
+   561→   561→
+   562→   562→          {/* Trade Summary */}
+   563→   563→          {prediction && amountNum > 0 && (
+   564→   564→            <motion.div
+   565→   565→              initial={{ opacity: 0, height: 0 }}
+   566→   566→              animate={{ opacity: 1, height: 'auto' }}
+   567→   567→              className="glass-strong rounded-lg p-3 space-y-2"
+   568→   568→            >
+   569→   569→              <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+   570→   570→                Trade Summary
+   571→   571→              </p>
+   572→   572→              <div className="grid grid-cols-2 gap-1 text-sm">
+   573→   573→                <span className="text-muted-foreground">Prediction</span>
+   574→   574→                <span className={`font-medium text-right ${prediction === 'UP' ? 'text-emerald-400' : 'text-red-400'}`}>
+   575→   575→                  {prediction === 'UP' ? 'BUY (UP)' : 'SELL (DOWN)'}
+   576→   576→                </span>
+   577→   577→                <span className="text-muted-foreground">Investment</span>
+   578→   578→                <span className="font-medium text-right">{formatNaira(amountNum)}</span>
+   579→   579→                <span className="text-muted-foreground">Multiplier</span>
+   580→   580→                <span className="font-medium text-right">{multiplier.toFixed(2)}x</span>
+   581→   581→                <span className="text-muted-foreground">Duration</span>
+   582→   582→                <span className="font-medium text-right">
+   583→   583→                  {DURATION_OPTIONS.find((d) => d.value === duration)?.label || `${duration}s`}
+   584→   584→                </span>
+   585→   585→                <span className="text-muted-foreground">Potential Profit</span>
+   586→   586→                <span className="font-bold text-right text-emerald-400">
+   587→   587→                  +{formatNaira(estimatedProfit)}
+   588→   588→                </span>
+   589→   589→              </div>
+   590→   590→            </motion.div>
+   591→   591→          )}
+   592→   592→
+   593→   593→          {/* Confirm Trade */}
+   594→   594→          <Button
+   595→   595→            onClick={handleTrade}
+   596→   596→            disabled={!prediction || amountNum <= 0 || amountNum > availableBalance || trading}
+   597→   597→            className="w-full gradient-gold text-gold-foreground font-bold h-12 text-base disabled:opacity-40 disabled:cursor-not-allowed"
+   598→   598→          >
+   599→   599→            {!prediction || amountNum <= 0 ? (
+   600→   600→              'Select Prediction & Amount'
+   601→   601→            ) : amountNum > availableBalance ? (
+   602→   602→              'Insufficient Balance'
+   603→   603→            ) : trading ? (
+   604→   604→              <span className="flex items-center gap-2">
+   605→   605→                <Loader2 className="w-5 h-5 animate-spin" />
+   606→   606→                Trading...
+   607→   607→              </span>
+   608→   608→            ) : (
+   609→   609→              `Confirm ${prediction === 'UP' ? 'BUY' : 'SELL'} Trade — ${formatNaira(amountNum)}`
+   610→   610→            )}
+   611→   611→          </Button>
+   612→   612→        </motion.div>
+   613→   613→
+   614→   614→        {/* Trading Overlay */}
+   615→   615→        <AnimatePresence>
+   616→   616→          {trading && tradeCountdown !== null && !tradeResult && (
+   617→   617→            <motion.div
+   618→   618→              initial={{ opacity: 0 }}
+   619→   619→              animate={{ opacity: 1 }}
+   620→   620→              exit={{ opacity: 0 }}
+   621→   621→              className="fixed inset-0 z-50 bg-black/85 backdrop-blur-md flex items-center justify-center p-4"
+   622→   622→            >
+   623→   623→              <motion.div
+   624→   624→                initial={{ scale: 0.9, opacity: 0 }}
+   625→   625→                animate={{ scale: 1, opacity: 1 }}
+   626→   626→                exit={{ scale: 0.9, opacity: 0 }}
+   627→   627→                className="glass-strong rounded-2xl p-8 max-w-sm w-full text-center"
+   628→   628→              >
+   629→   629→                <div className={`w-24 h-24 rounded-full mx-auto mb-6 flex items-center justify-center ${
+   630→   630→                  prediction === 'UP' ? 'bg-emerald-500/15' : 'bg-red-500/15'
+   631→   631→                }`}>
+   632→   632→                  <motion.div
+   633→   633→                    animate={{ rotate: 360 }}
+   634→   634→                    transition={{ repeat: Infinity, duration: 2, ease: 'linear' }}
+   635→   635→                    className={`w-20 h-20 rounded-full border-4 border-t-transparent ${
+   636→   636→                      prediction === 'UP' ? 'border-emerald-500/60' : 'border-red-500/60'
+   637→   637→                    }`}
+   638→   638→                  />
+   639→   639→                  {prediction === 'UP' ? (
+   640→   640→                    <ArrowUpCircle className={`w-10 h-10 text-emerald-400 absolute`} />
+   641→   641→                  ) : (
+   642→   642→                    <ArrowDownCircle className={`w-10 h-10 text-red-400 absolute`} />
+   643→   643→                  )}
+   644→   644→                </div>
+   645→   645→
+   646→   646→                <h3 className="text-xl font-bold mb-1">
+   647→   647→                  Trade in Progress
+   648→   648→                </h3>
+   649→   649→                <p className="text-sm text-muted-foreground mb-6">
+   650→   650→                  Waiting for {DURATION_OPTIONS.find((d) => d.value === duration)?.label || `${duration}s`} to complete...
+   651→   651→                </p>
+   652→   652→
+   653→   653→                <div className="text-6xl font-bold font-mono mb-4">
+   654→   654→                  <span className={prediction === 'UP' ? 'text-emerald-400' : 'text-red-400'}>
+   655→   655→                    {formatCountdown(tradeCountdown)}
+   656→   656→                  </span>
+   657→   657→                </div>
+   658→   658→
+   659→   659→                <div className="w-full h-1.5 rounded-full bg-white/10 overflow-hidden">
+   660→   660→                  <motion.div
+   661→   661→                    className={`h-full rounded-full ${
+   662→   662→                      prediction === 'UP' ? 'bg-emerald-500' : 'bg-red-500'
+   663→   663→                    }`}
+   664→   664→                    initial={{ width: '0%' }}
+   665→   665→                    animate={{
+   666→   666→                      width: `${((duration - tradeCountdown) / duration) * 100}%`,
+   667→   667→                    }}
+   668→   668→                    transition={{ duration: 0.5 }}
+   669→   669→                  />
+   670→   670→                </div>
+   671→   671→
+   672→   672→                <div className="mt-4 glass rounded-lg p-3 text-sm">
+   673→   673→                  <div className="flex justify-between">
+   674→   674→                    <span className="text-muted-foreground">Amount</span>
+   675→   675→                    <span className="font-semibold">{formatNaira(amountNum)}</span>
+   676→   676→                  </div>
+   677→   677→                  <div className="flex justify-between mt-1">
+   678→   678→                    <span className="text-muted-foreground">Multiplier</span>
+   679→   679→                    <span className="font-semibold">{multiplier.toFixed(2)}x</span>
+   680→   680→                  </div>
+   681→   681→                  <div className="flex justify-between mt-1">
+   682→   682→                    <span className="text-muted-foreground">Potential</span>
+   683→   683→                    <span className="font-semibold text-emerald-400">+{formatNaira(estimatedProfit)}</span>
+   684→   684→                  </div>
+   685→   685→                </div>
+   686→   686→              </motion.div>
+   687→   687→            </motion.div>
+   688→   688→          )}
+   689→   689→        </AnimatePresence>
+   690→   690→
+   691→   691→        {/* Trade Result Overlay */}
+   692→   692→        <AnimatePresence>
+   693→   693→          {tradeResult && (
+   694→   694→            <motion.div
+   695→   695→              initial={{ opacity: 0 }}
+   696→   696→              animate={{ opacity: 1 }}
+   697→   697→              exit={{ opacity: 0 }}
+   698→   698→              className="fixed inset-0 z-50 bg-black/85 backdrop-blur-md flex items-center justify-center p-4"
+   699→   699→              onClick={() => setTradeResult(null)}
+   700→   700→            >
+   701→   701→              <motion.div
+   702→   702→                initial={{ scale: 0.5, opacity: 0 }}
+   703→   703→                animate={{ scale: 1, opacity: 1 }}
+   704→   704→                exit={{ scale: 0.5, opacity: 0 }}
+   705→   705→                transition={{ type: 'spring', stiffness: 200, damping: 15 }}
+   706→   706→                className={`glass-strong rounded-2xl p-8 max-w-sm w-full text-center border ${
+   707→   707→                  tradeResult.win ? 'border-emerald-500/30' : 'border-red-500/30'
+   708→   708→                }`}
+   709→   709→                onClick={(e) => e.stopPropagation()}
+   710→   710→              >
+   711→   711→                <motion.div
+   712→   712→                  initial={{ scale: 0, rotate: -180 }}
+   713→   713→                  animate={{ scale: 1, rotate: 0 }}
+   714→   714→                  transition={{ type: 'spring', stiffness: 200, delay: 0.1 }}
+   715→   715→                  className={`w-24 h-24 rounded-full mx-auto mb-4 flex items-center justify-center ${
+   716→   716→                    tradeResult.win ? 'bg-emerald-500/20' : 'bg-red-500/20'
+   717→   717→                  }`}
+   718→   718→                >
+   719→   719→                  {tradeResult.win ? (
+   720→   720→                    <Trophy className="w-12 h-12 text-emerald-400" />
+   721→   721→                  ) : (
+   722→   722→                    <XCircle className="w-12 h-12 text-red-400" />
+   723→   723→                  )}
+   724→   724→                </motion.div>
+   725→   725→
+   726→   726→                <motion.h3
+   727→   727→                  initial={{ opacity: 0, y: 10 }}
+   728→   728→                  animate={{ opacity: 1, y: 0 }}
+   729→   729→                  transition={{ delay: 0.2 }}
+   730→   730→                  className={`text-2xl font-bold mb-2 ${
+   731→   731→                    tradeResult.win ? 'text-emerald-400' : 'text-red-400'
+   732→   732→                  }`}
+   733→   733→                >
+   734→   734→                  {tradeResult.win ? 'You Won!' : 'You Lost'}
+   735→   735→                </motion.h3>
+   736→   736→
+   737→   737→                <motion.p
+   738→   738→                  initial={{ opacity: 0, y: 10 }}
+   739→   739→                  animate={{ opacity: 1, y: 0 }}
+   740→   740→                  transition={{ delay: 0.3 }}
+   741→   741→                  className="text-sm text-muted-foreground mb-4"
+   742→   742→                >
+   743→   743→                  {tradeResult.message}
+   744→   744→                </motion.p>
+   745→   745→
+   746→   746→                <motion.div
+   747→   747→                  initial={{ opacity: 0, y: 10 }}
+   748→   748→                  animate={{ opacity: 1, y: 0 }}
+   749→   749→                  transition={{ delay: 0.4 }}
+   750→   750→                  className={`text-4xl font-bold font-mono mb-6 ${
+   751→   751→                    tradeResult.win ? 'text-emerald-400' : 'text-red-400'
+   752→   752→                  }`}
+   753→   753→                >
+   754→   754→                  {tradeResult.win ? '+' : ''}{formatNaira(tradeResult.profit)}
+   755→   755→                </motion.div>
+   756→   756→
+   757→   757→                <Button
+   758→   758→                  onClick={() => setTradeResult(null)}
+   759→   759→                  className={`w-full font-semibold h-11 ${
+   760→   760→                    tradeResult.win
+   761→   761→                      ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 hover:bg-emerald-500/30'
+   762→   762→                      : 'bg-red-500/20 text-red-400 border border-red-500/30 hover:bg-red-500/30'
+   763→   763→                  }`}
+   764→   764→                >
+   765→   765→                  Continue Trading
+   766→   766→                </Button>
+   767→   767→              </motion.div>
+   768→   768→            </motion.div>
+   769→   769→          )}
+   770→   770→        </AnimatePresence>
+   771→   771→
+   772→   772→        {/* Trade History */}
+   773→   773→        <motion.div
+   774→   774→          initial={{ opacity: 0, y: 20 }}
+   775→   775→          animate={{ opacity: 1, y: 0 }}
+   776→   776→          transition={{ delay: 0.2 }}
+   777→   777→          className="glass rounded-xl p-4"
+   778→   778→        >
+   779→   779→          <div className="flex items-center justify-between mb-3">
+   780→   780→            <div className="flex items-center gap-2">
+   781→   781→              <History className="w-4 h-4 text-muted-foreground" />
+   782→   782→              <h2 className="font-semibold text-sm">Trade History</h2>
+   783→   783→            </div>
+   784→   784→            <div className="flex gap-1">
+   785→   785→              {HISTORY_FILTERS.map((f) => (
+   786→   786→                <button
+   787→   787→                  key={f.value}
+   788→   788→                  onClick={() => setHistoryFilter(f.value)}
+   789→   789→                  className={`px-3 py-1 rounded-lg text-xs font-medium transition-colors ${
+   790→   790→                    historyFilter === f.value
+   791→   791→                      ? 'glass-strong text-gold'
+   792→   792→                      : 'text-muted-foreground hover:text-foreground hover:bg-white/5'
+   793→   793→                  }`}
+   794→   794→                >
+   795→   795→                  {f.label}
+   796→   796→                </button>
+   797→   797→              ))}
+   798→   798→            </div>
+   799→   799→          </div>
+   800→   800→
+   801→   801→          {historyLoading ? (
+   802→   802→            <div className="space-y-2">
+   803→   803→              {Array.from({ length: 3 }).map((_, i) => (
+   804→   804→                <Skeleton key={i} className="h-12 rounded-lg bg-white/5" />
+   805→   805→              ))}
+   806→   806→            </div>
+   807→   807→          ) : filteredHistory.length === 0 ? (
+   808→   808→            <div className="text-center py-8">
+   809→   809→              <Filter className="w-8 h-8 text-muted-foreground/40 mx-auto mb-2" />
+   810→   810→              <p className="text-sm text-muted-foreground">No trades found</p>
+   811→   811→            </div>
+   812→   812→          ) : (
+   813→   813→            <div className="max-h-80 overflow-y-auto scrollbar-thin -mx-1">
+   814→   814→              <Table>
+   815→   815→                <TableHeader>
+   816→   816→                  <TableRow className="border-white/5 hover:bg-transparent">
+   817→   817→                    <TableHead className="text-[10px] text-muted-foreground">Date</TableHead>
+   818→   818→                    <TableHead className="text-[10px] text-muted-foreground">Side</TableHead>
+   819→   819→                    <TableHead className="text-[10px] text-muted-foreground text-right">Amount</TableHead>
+   820→   820→                    <TableHead className="text-[10px] text-muted-foreground text-right">Multi</TableHead>
+   821→   821→                    <TableHead className="text-[10px] text-muted-foreground text-right">Time</TableHead>
+   822→   822→                    <TableHead className="text-[10px] text-muted-foreground text-right">Result</TableHead>
+   823→   823→                    <TableHead className="text-[10px] text-muted-foreground text-right">P/L</TableHead>
+   824→   824→                  </TableRow>
+   825→   825→                </TableHeader>
+   826→   826→                <TableBody>
+   827→   827→                  {filteredHistory.map((trade, i) => (
+   828→   828→                    <TableRow key={trade.id} className="border-white/5">
+   829→   829→                      <TableCell className="text-xs text-muted-foreground py-2">
+   830→   830→                        {new Date(trade.createdAt).toLocaleDateString('en-US', {
+   831→   831→                          month: 'short',
+   832→   832→                          day: 'numeric',
+   833→   833→                        })}
+   834→   834→                      </TableCell>
+   835→   835→                      <TableCell className="py-2">
+   836→   836→                        <Badge
+   837→   837→                          className={`text-[10px] gap-0.5 ${
+   838→   838→                            trade.prediction === 'UP'
+   839→   839→                              ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20'
+   840→   840→                              : 'bg-red-500/10 text-red-400 border-red-500/20'
+   841→   841→                          }`}
+   842→   842→                        >
+   843→   843→                          {trade.prediction === 'UP' ? (
+   844→   844→                            <ArrowUpCircle className="w-3 h-3" />
+   845→   845→                          ) : (
+   846→   846→                            <ArrowDownCircle className="w-3 h-3" />
+   847→   847→                          )}
+   848→   848→                          {trade.prediction}
+   849→   849→                        </Badge>
+   850→   850→                      </TableCell>
+   851→   851→                      <TableCell className="text-xs font-medium text-right py-2">
+   852→   852→                        {formatNaira(trade.amount)}
+   853→   853→                      </TableCell>
+   854→   854→                      <TableCell className="text-xs text-muted-foreground text-right py-2">
+   855→   855→                        {trade.multiplier.toFixed(2)}x
+   856→   856→                      </TableCell>
+   857→   857→                      <TableCell className="text-xs text-muted-foreground text-right py-2">
+   858→   858→                        {DURATION_OPTIONS.find((d) => d.value === trade.duration)?.label || `${trade.duration}s`}
+   859→   859→                      </TableCell>
+   860→   860→                      <TableCell className="text-right py-2">
+   861→   861→                        <Badge
+   862→   862→                          className={`text-[10px] ${
+   863→   863→                            trade.result === 'win'
+   864→   864→                              ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20'
+   865→   865→                              : 'bg-red-500/10 text-red-400 border-red-500/20'
+   866→   866→                          }`}
+   867→   867→                        >
+   868→   868→                          {trade.result === 'win' ? (
+   869→   869→                            <CheckCircle2 className="w-3 h-3 mr-0.5" />
+   870→   870→                          ) : (
+   871→   871→                            <XCircle className="w-3 h-3 mr-0.5" />
+   872→   872→                          )}
+   873→   873→                          {trade.result.toUpperCase()}
+   874→   874→                        </Badge>
+   875→   875→                      </TableCell>
+   876→   876→                      <TableCell
+   877→   877→                        className={`text-xs font-bold text-right py-2 ${
+   878→   878→                          trade.profit >= 0 ? 'text-emerald-400' : 'text-red-400'
+   879→   879→                        }`}
+   880→   880→                      >
+   881→   881→                        {trade.profit >= 0 ? '+' : ''}{formatNaira(trade.profit)}
+   882→   882→                      </TableCell>
+   883→   883→                    </TableRow>
+   884→   884→                  ))}
+   885→   885→                </TableBody>
+   886→   886→              </Table>
+   887→   887→            </div>
+   888→   888→          )}
+   889→   889→        </motion.div>
+   890→   890→      </main>
+   891→   891→    </div>
+   892→   892→  );
+   893→   893→}
+   894→   894→

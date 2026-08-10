@@ -1,0 +1,631 @@
+     1→     1→'use client';
+     2→     2→
+     3→     3→import { useState, useEffect, useCallback } from 'react';
+     4→     4→import { motion, AnimatePresence } from 'framer-motion';
+     5→     5→import { useAppStore, apiFetch, ViewName } from '@/store';
+     6→     6→import { Button } from '@/components/ui/button';
+     7→     7→import { Input } from '@/components/ui/input';
+     8→     8→import { Label } from '@/components/ui/label';
+     9→     9→import { InputOTP, InputOTPGroup, InputOTPSlot, InputOTPSeparator } from '@/components/ui/input-otp';
+    10→    10→import { Coins, Mail, Lock, User, Phone, UserPlus, ArrowRight, Eye, EyeOff, ShieldCheck, RefreshCw, ArrowLeft } from 'lucide-react';
+    11→    11→
+    12→    12→export default function AuthView() {
+    13→    13→  const { view, setView, setToken, setUser, pendingRegistration, setPendingRegistration } = useAppStore();
+    14→    14→  const isLogin = view === 'login';
+    15→    15→  const isVerifyOtp = view === 'verify-otp';
+    16→    16→
+    17→    17→  // Login state
+    18→    18→  const [loginId, setLoginId] = useState('');
+    19→    19→  const [loginPassword, setLoginPassword] = useState('');
+    20→    20→  const [loginLoading, setLoginLoading] = useState(false);
+    21→    21→  const [loginError, setLoginError] = useState('');
+    22→    22→  const [showLoginPw, setShowLoginPw] = useState(false);
+    23→    23→
+    24→    24→  // Register state
+    25→    25→  const [fullName, setFullName] = useState('');
+    26→    26→  const [username, setUsername] = useState('');
+    27→    27→  const [email, setEmail] = useState('');
+    28→    28→  const [phone, setPhone] = useState('');
+    29→    29→  const [password, setPassword] = useState('');
+    30→    30→  const [confirmPassword, setConfirmPassword] = useState('');
+    31→    31→  const [referralCode, setReferralCode] = useState('');
+    32→    32→  const [regLoading, setRegLoading] = useState(false);
+    33→    33→  const [regError, setRegError] = useState('');
+    34→    34→  const [showRegPw, setShowRegPw] = useState(false);
+    35→    35→
+    36→    36→  // OTP state
+    37→    37→  const [otp, setOtp] = useState('');
+    38→    38→  const [otpLoading, setOtpLoading] = useState(false);
+    39→    39→  const [otpError, setOtpError] = useState('');
+    40→    40→  const [otpSuccess, setOtpSuccess] = useState(false);
+    41→    41→  const [resendLoading, setResendLoading] = useState(false);
+    42→    42→  const [resendCooldown, setResendCooldown] = useState(0);
+    43→    43→
+    44→    44→  // Countdown timer for resend
+    45→    45→  useEffect(() => {
+    46→    46→    if (resendCooldown <= 0) return;
+    47→    47→    const timer = setInterval(() => {
+    48→    48→      setResendCooldown((prev) => prev - 1);
+    49→    49→    }, 1000);
+    50→    50→    return () => clearInterval(timer);
+    51→    51→  }, [resendCooldown]);
+    52→    52→
+    53→    53→  // If there's pending registration data and we're on verify-otp, start cooldown
+    54→    54→  useEffect(() => {
+    55→    55→    if (isVerifyOtp && resendCooldown === 0) {
+    56→    56→      setResendCooldown(60);
+    57→    57→    }
+    58→    58→  }, [isVerifyOtp]);
+    59→    59→
+    60→    60→  const handleLogin = async (e: React.FormEvent) => {
+    61→    61→    e.preventDefault();
+    62→    62→    setLoginLoading(true);
+    63→    63→    setLoginError('');
+    64→    64→    try {
+    65→    65→      const data = await apiFetch('/api/auth/login', {
+    66→    66→        method: 'POST',
+    67→    67→        body: JSON.stringify({ loginId, password: loginPassword }),
+    68→    68→      });
+    69→    69→      setToken(data.token);
+    70→    70→      setUser(data.user);
+    71→    71→      if (data.user.role === 'admin') {
+    72→    72→        setView('admin-dashboard');
+    73→    73→      } else {
+    74→    74→        setView('dashboard');
+    75→    75→      }
+    76→    76→    } catch (err: any) {
+    77→    77→      setLoginError(err.message || 'Login failed');
+    78→    78→    } finally {
+    79→    79→      setLoginLoading(false);
+    80→    80→    }
+    81→    81→  };
+    82→    82→
+    83→    83→  const handleRegister = async (e: React.FormEvent) => {
+    84→    84→    e.preventDefault();
+    85→    85→    if (password !== confirmPassword) {
+    86→    86→      setRegError('Passwords do not match');
+    87→    87→      return;
+    88→    88→    }
+    89→    89→    setRegLoading(true);
+    90→    90→    setRegError('');
+    91→    91→    try {
+    92→    92→      const data = await apiFetch('/api/auth/register', {
+    93→    93→        method: 'POST',
+    94→    94→        body: JSON.stringify({ fullName, username, email, phone, password, referralCode: referralCode || undefined }),
+    95→    95→      });
+    96→    96→
+    97→    97→      if (data.requiresOtp) {
+    98→    98→        // Save pending registration and switch to OTP view
+    99→    99→        setPendingRegistration({ email, password, fullName, username, phone });
+   100→   100→        setUser(data.user);
+   101→   101→        setView('verify-otp');
+   102→   102→      } else {
+   103→   103→        // Email confirmation is off - go straight to dashboard
+   104→   104→        setToken(data.token);
+   105→   105→        setUser(data.user);
+   106→   106→        if (data.user.role === 'admin') {
+   107→   107→          setView('admin-dashboard');
+   108→   108→        } else {
+   109→   109→          setView('dashboard');
+   110→   110→        }
+   111→   111→      }
+   112→   112→    } catch (err: any) {
+   113→   113→      setRegError(err.message || 'Registration failed');
+   114→   114→    } finally {
+   115→   115→      setRegLoading(false);
+   116→   116→    }
+   117→   117→  };
+   118→   118→
+   119→   119→  const handleVerifyOtp = async (e: React.FormEvent) => {
+   120→   120→    e.preventDefault();
+   121→   121→    if (!pendingRegistration) return;
+   122→   122→
+   123→   123→    setOtpLoading(true);
+   124→   124→    setOtpError('');
+   125→   125→    setOtpSuccess(false);
+   126→   126→
+   127→   127→    try {
+   128→   128→      const data = await apiFetch('/api/auth/verify-otp', {
+   129→   129→        method: 'POST',
+   130→   130→        body: JSON.stringify({
+   131→   131→          email: pendingRegistration.email,
+   132→   132→          otp,
+   133→   133→          password: pendingRegistration.password,
+   134→   134→        }),
+   135→   135→      });
+   136→   136→
+   137→   137→      setOtpSuccess(true);
+   138→   138→      setToken(data.token);
+   139→   139→      setUser(data.user);
+   140→   140→      setPendingRegistration(null);
+   141→   141→
+   142→   142→      // Brief success animation then redirect
+   143→   143→      setTimeout(() => {
+   144→   144→        if (data.user.role === 'admin') {
+   145→   145→          setView('admin-dashboard');
+   146→   146→        } else {
+   147→   147→          setView('dashboard');
+   148→   148→        }
+   149→   149→      }, 1200);
+   150→   150→    } catch (err: any) {
+   151→   151→      setOtpError(err.message || 'OTP verification failed');
+   152→   152→    } finally {
+   153→   153→      setOtpLoading(false);
+   154→   154→    }
+   155→   155→  };
+   156→   156→
+   157→   157→  const handleResendOtp = async () => {
+   158→   158→    if (!pendingRegistration || resendCooldown > 0) return;
+   159→   159→
+   160→   160→    setResendLoading(true);
+   161→   161→    setOtpError('');
+   162→   162→    try {
+   163→   163→      await apiFetch('/api/auth/verify-otp', {
+   164→   164→        method: 'PUT',
+   165→   165→        body: JSON.stringify({ email: pendingRegistration.email }),
+   166→   166→      });
+   167→   167→      setResendCooldown(60);
+   168→   168→    } catch (err: any) {
+   169→   169→      setOtpError(err.message || 'Failed to resend OTP');
+   170→   170→    } finally {
+   171→   171→      setResendLoading(false);
+   172→   172→    }
+   173→   173→  };
+   174→   174→
+   175→   175→  const handleBackToRegister = () => {
+   176→   176→    setOtp('');
+   177→   177→    setOtpError('');
+   178→   178→    setOtpSuccess(false);
+   179→   179→    setPendingRegistration(null);
+   180→   180→    setDirection(-1);
+   181→   181→    setView('register');
+   182→   182→  };
+   183→   183→
+   184→   184→  const slideVariants = {
+   185→   185→    enter: (direction: number) => ({ x: direction > 0 ? 300 : -300, opacity: 0 }),
+   186→   186→    center: { x: 0, opacity: 1 },
+   187→   187→    exit: (direction: number) => ({ x: direction > 0 ? -300 : 300, opacity: 0 }),
+   188→   188→  };
+   189→   189→
+   190→   190→  const [direction, setDirection] = useState(1);
+   191→   191→
+   192→   192→  const switchView = (target: ViewName) => {
+   193→   193→    setDirection(target === 'register' || target === 'verify-otp' ? 1 : -1);
+   194→   194→    setView(target);
+   195→   195→  };
+   196→   196→
+   197→   197→  // Mask email for display
+   198→   198→  const maskEmail = (email: string) => {
+   199→   199→    const [user, domain] = email.split('@');
+   200→   200→    if (user.length <= 2) return email;
+   201→   201→    return user[0] + '***' + user[user.length - 1] + '@' + domain;
+   202→   202→  };
+   203→   203→
+   204→   204→  return (
+   205→   205→    <div className="min-h-screen flex items-center justify-center p-4">
+   206→   206→      <div className="w-full max-w-md">
+   207→   207→        {/* Logo */}
+   208→   208→        <motion.div
+   209→   209→          initial={{ scale: 0.8, opacity: 0 }}
+   210→   210→          animate={{ scale: 1, opacity: 1 }}
+   211→   211→          className="text-center mb-8"
+   212→   212→        >
+   213→   213→          <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl gradient-gold gold-glow mb-4">
+   214→   214→            <Coins className="w-8 h-8 text-gold-foreground" />
+   215→   215→          </div>
+   216→   216→          <h1 className="text-3xl font-bold gradient-gold-text">ALCOIN</h1>
+   217→   217→          <p className="text-muted-foreground text-sm mt-1">Digital Rewards Platform</p>
+   218→   218→        </motion.div>
+   219→   219→
+   220→   220→        {/* Form Container */}
+   221→   221→        <div className="glass rounded-2xl p-6 sm:p-8 overflow-hidden relative">
+   222→   222→          <AnimatePresence mode="wait" custom={direction}>
+   223→   223→            {isVerifyOtp ? (
+   224→   224→              <motion.form
+   225→   225→                key="verify-otp"
+   226→   226→                custom={direction}
+   227→   227→                variants={slideVariants}
+   228→   228→                initial="enter"
+   229→   229→                animate="center"
+   230→   230→                exit="exit"
+   231→   231→                transition={{ type: 'spring', stiffness: 300, damping: 30 }}
+   232→   232→                onSubmit={handleVerifyOtp}
+   233→   233→                className="space-y-6"
+   234→   234→              >
+   235→   235→                <div className="text-center mb-2">
+   236→   236→                  <motion.div
+   237→   237→                    initial={{ scale: 0 }}
+   238→   238→                    animate={{ scale: 1 }}
+   239→   239→                    transition={{ type: 'spring', stiffness: 200, damping: 15, delay: 0.1 }}
+   240→   240→                    className="inline-flex items-center justify-center w-14 h-14 rounded-full bg-gold/10 mb-4"
+   241→   241→                  >
+   242→   242→                    <ShieldCheck className="w-7 h-7 text-gold" />
+   243→   243→                  </motion.div>
+   244→   244→                  <h2 className="text-xl font-semibold">Verify Your Email</h2>
+   245→   245→                  <p className="text-muted-foreground text-sm mt-2">
+   246→   246→                    We sent a verification code to
+   247→   247→                  </p>
+   248→   248→                  <p className="text-foreground font-medium text-sm mt-1">
+   249→   249→                    {pendingRegistration ? maskEmail(pendingRegistration.email) : 'your email'}
+   250→   250→                  </p>
+   251→   251→                </div>
+   252→   252→
+   253→   253→                {otpError && (
+   254→   254→                  <motion.div
+   255→   255→                    initial={{ opacity: 0, y: -10 }}
+   256→   256→                    animate={{ opacity: 1, y: 0 }}
+   257→   257→                    className="p-3 rounded-lg bg-destructive/10 border border-destructive/20 text-destructive text-sm"
+   258→   258→                  >
+   259→   259→                    {otpError}
+   260→   260→                  </motion.div>
+   261→   261→                )}
+   262→   262→
+   263→   263→                {otpSuccess && (
+   264→   264→                  <motion.div
+   265→   265→                    initial={{ opacity: 0, y: -10 }}
+   266→   266→                    animate={{ opacity: 1, y: 0 }}
+   267→   267→                    className="p-3 rounded-lg bg-green-500/10 border border-green-500/20 text-green-400 text-sm text-center"
+   268→   268→                  >
+   269→   269→                    Email verified successfully! Redirecting...
+   270→   270→                  </motion.div>
+   271→   271→                )}
+   272→   272→
+   273→   273→                {/* OTP Input */}
+   274→   274→                <div className="flex justify-center py-2">
+   275→   275→                  <InputOTP
+   276→   276→                    maxLength={6}
+   277→   277→                    value={otp}
+   278→   278→                    onChange={setOtp}
+   279→   279→                    disabled={otpLoading || otpSuccess}
+   280→   280→                    render={({ slots }) => (
+   281→   281→                      <InputOTPGroup>
+   282→   282→                        {slots.slice(0, 3).map((slot, i) => (
+   283→   283→                          <InputOTPSlot key={i} {...slot} index={i} className="h-12 w-12 text-lg bg-white/5 border-white/10 data-[active=true]:border-gold data-[active=true]:ring-gold/30" />
+   284→   284→                        ))}
+   285→   285→                        <InputOTPSeparator className="mx-1" />
+   286→   286→                        {slots.slice(3, 6).map((slot, i) => (
+   287→   287→                          <InputOTPSlot key={i + 3} {...slot} index={i + 3} className="h-12 w-12 text-lg bg-white/5 border-white/10 data-[active=true]:border-gold data-[active=true]:ring-gold/30" />
+   288→   288→                        ))}
+   289→   289→                      </InputOTPGroup>
+   290→   290→                    )}
+   291→   291→                  />
+   292→   292→                </div>
+   293→   293→
+   294→   294→                <p className="text-center text-xs text-muted-foreground">
+   295→   295→                  Enter the 6-digit code sent to your email
+   296→   296→                </p>
+   297→   297→
+   298→   298→                <Button
+   299→   299→                  type="submit"
+   300→   300→                  disabled={otpLoading || otp.length !== 6 || otpSuccess}
+   301→   301→                  className="w-full gradient-gold text-gold-foreground font-semibold h-12 hover:opacity-90 transition-opacity"
+   302→   302→                >
+   303→   303→                  {otpLoading ? (
+   304→   304→                    <motion.div
+   305→   305→                      animate={{ rotate: 360 }}
+   306→   306→                      transition={{ repeat: Infinity, duration: 1, ease: 'linear' }}
+   307→   307→                      className="w-5 h-5 border-2 border-gold-foreground/30 border-t-gold-foreground rounded-full"
+   308→   308→                    />
+   309→   309→                  ) : (
+   310→   310→                    <span className="flex items-center justify-center gap-2">
+   311→   311→                      <ShieldCheck className="w-4 h-4" />
+   312→   312→                      Verify OTP
+   313→   313→                    </span>
+   314→   314→                  )}
+   315→   315→                </Button>
+   316→   316→
+   317→   317→                {/* Resend OTP */}
+   318→   318→                <div className="text-center">
+   319→   319→                  <p className="text-sm text-muted-foreground">
+   320→   320→                    Didn&apos;t receive the code?{' '}
+   321→   321→                    {resendCooldown > 0 ? (
+   322→   322→                      <span className="text-muted-foreground/60">
+   323→   323→                        Resend in {resendCooldown}s
+   324→   324→                      </span>
+   325→   325→                    ) : (
+   326→   326→                      <button
+   327→   327→                        type="button"
+   328→   328→                        onClick={handleResendOtp}
+   329→   329→                        disabled={resendLoading}
+   330→   330→                        className="text-gold hover:underline font-medium inline-flex items-center gap-1 disabled:opacity-50"
+   331→   331→                      >
+   332→   332→                        {resendLoading ? (
+   333→   333→                          <motion.div
+   334→   334→                            animate={{ rotate: 360 }}
+   335→   335→                            transition={{ repeat: Infinity, duration: 1, ease: 'linear' }}
+   336→   336→                            className="w-3 h-3 border-2 border-gold/30 border-t-gold rounded-full"
+   337→   337→                          />
+   338→   338→                        ) : (
+   339→   339→                          <RefreshCw className="w-3 h-3" />
+   340→   340→                        )}
+   341→   341→                        Resend Code
+   342→   342→                      </button>
+   343→   343→                    )}
+   344→   344→                  </p>
+   345→   345→                </div>
+   346→   346→
+   347→   347→                {/* Back to register */}
+   348→   348→                <div className="text-center">
+   349→   349→                  <button
+   350→   350→                    type="button"
+   351→   351→                    onClick={handleBackToRegister}
+   352→   352→                    className="text-sm text-muted-foreground hover:text-foreground transition-colors inline-flex items-center gap-1"
+   353→   353→                  >
+   354→   354→                    <ArrowLeft className="w-3 h-3" />
+   355→   355→                    Back to Register
+   356→   356→                  </button>
+   357→   357→                </div>
+   358→   358→              </motion.form>
+   359→   359→            ) : isLogin ? (
+   360→   360→              <motion.form
+   361→   361→                key="login"
+   362→   362→                custom={direction}
+   363→   363→                variants={slideVariants}
+   364→   364→                initial="enter"
+   365→   365→                animate="center"
+   366→   366→                exit="exit"
+   367→   367→                transition={{ type: 'spring', stiffness: 300, damping: 30 }}
+   368→   368→                onSubmit={handleLogin}
+   369→   369→                className="space-y-5"
+   370→   370→              >
+   371→   371→                <div className="text-center mb-2">
+   372→   372→                  <h2 className="text-xl font-semibold">Welcome Back</h2>
+   373→   373→                  <p className="text-muted-foreground text-sm mt-1">Sign in to your account</p>
+   374→   374→                </div>
+   375→   375→
+   376→   376→                {loginError && (
+   377→   377→                  <motion.div
+   378→   378→                    initial={{ opacity: 0, y: -10 }}
+   379→   379→                    animate={{ opacity: 1, y: 0 }}
+   380→   380→                    className="p-3 rounded-lg bg-destructive/10 border border-destructive/20 text-destructive text-sm"
+   381→   381→                  >
+   382→   382→                    {loginError}
+   383→   383→                  </motion.div>
+   384→   384→                )}
+   385→   385→
+   386→   386→                <div className="space-y-2">
+   387→   387→                  <Label htmlFor="loginId" className="text-sm text-muted-foreground">Email or Username</Label>
+   388→   388→                  <div className="relative">
+   389→   389→                    <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+   390→   390→                    <Input
+   391→   391→                      id="loginId"
+   392→   392→                      type="text"
+   393→   393→                      placeholder="Enter email or username"
+   394→   394→                      value={loginId}
+   395→   395→                      onChange={(e) => setLoginId(e.target.value)}
+   396→   396→                      className="pl-10 bg-white/5 border-white/10 focus:border-gold"
+   397→   397→                      required
+   398→   398→                    />
+   399→   399→                  </div>
+   400→   400→                </div>
+   401→   401→
+   402→   402→                <div className="space-y-2">
+   403→   403→                  <Label htmlFor="loginPw" className="text-sm text-muted-foreground">Password</Label>
+   404→   404→                  <div className="relative">
+   405→   405→                    <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+   406→   406→                    <Input
+   407→   407→                      id="loginPw"
+   408→   408→                      type={showLoginPw ? 'text' : 'password'}
+   409→   409→                      placeholder="Enter password"
+   410→   410→                      value={loginPassword}
+   411→   411→                      onChange={(e) => setLoginPassword(e.target.value)}
+   412→   412→                      className="pl-10 pr-10 bg-white/5 border-white/10 focus:border-gold"
+   413→   413→                      required
+   414→   414→                    />
+   415→   415→                    <button
+   416→   416→                      type="button"
+   417→   417→                      onClick={() => setShowLoginPw(!showLoginPw)}
+   418→   418→                      className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
+   419→   419→                    >
+   420→   420→                      {showLoginPw ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+   421→   421→                    </button>
+   422→   422→                  </div>
+   423→   423→                </div>
+   424→   424→
+   425→   425→                <Button
+   426→   426→                  type="submit"
+   427→   427→                  disabled={loginLoading}
+   428→   428→                  className="w-full gradient-gold text-gold-foreground font-semibold h-12 hover:opacity-90 transition-opacity"
+   429→   429→                >
+   430→   430→                  {loginLoading ? (
+   431→   431→                    <motion.div
+   432→   432→                      animate={{ rotate: 360 }}
+   433→   433→                      transition={{ repeat: Infinity, duration: 1, ease: 'linear' }}
+   434→   434→                      className="w-5 h-5 border-2 border-gold-foreground/30 border-t-gold-foreground rounded-full"
+   435→   435→                    />
+   436→   436→                  ) : (
+   437→   437→                    <span className="flex items-center gap-2">Sign In <ArrowRight className="w-4 h-4" /></span>
+   438→   438→                  )}
+   439→   439→                </Button>
+   440→   440→
+   441→   441→                <p className="text-center text-sm text-muted-foreground">
+   442→   442→                  Don&apos;t have an account?{' '}
+   443→   443→                  <button
+   444→   444→                    type="button"
+   445→   445→                    onClick={() => switchView('register')}
+   446→   446→                    className="text-gold hover:underline font-medium"
+   447→   447→                  >
+   448→   448→                    Create Account
+   449→   449→                  </button>
+   450→   450→                </p>
+   451→   451→              </motion.form>
+   452→   452→            ) : (
+   453→   453→              <motion.form
+   454→   454→                key="register"
+   455→   455→                custom={direction}
+   456→   456→                variants={slideVariants}
+   457→   457→                initial="enter"
+   458→   458→                animate="center"
+   459→   459→                exit="exit"
+   460→   460→                transition={{ type: 'spring', stiffness: 300, damping: 30 }}
+   461→   461→                onSubmit={handleRegister}
+   462→   462→                className="space-y-4"
+   463→   463→              >
+   464→   464→                <div className="text-center mb-2">
+   465→   465→                  <h2 className="text-xl font-semibold">Create Account</h2>
+   466→   466→                  <p className="text-muted-foreground text-sm mt-1">Join ALCOIN and start earning</p>
+   467→   467→                </div>
+   468→   468→
+   469→   469→                {regError && (
+   470→   470→                  <motion.div
+   471→   471→                    initial={{ opacity: 0, y: -10 }}
+   472→   472→                    animate={{ opacity: 1, y: 0 }}
+   473→   473→                    className="p-3 rounded-lg bg-destructive/10 border border-destructive/20 text-destructive text-sm"
+   474→   474→                  >
+   475→   475→                    {regError}
+   476→   476→                  </motion.div>
+   477→   477→                )}
+   478→   478→
+   479→   479→                <div className="space-y-2">
+   480→   480→                  <Label htmlFor="fullName" className="text-sm text-muted-foreground">Full Name</Label>
+   481→   481→                  <div className="relative">
+   482→   482→                    <User className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+   483→   483→                    <Input
+   484→   484→                      id="fullName"
+   485→   485→                      type="text"
+   486→   486→                      placeholder="Enter full name"
+   487→   487→                      value={fullName}
+   488→   488→                      onChange={(e) => setFullName(e.target.value)}
+   489→   489→                      className="pl-10 bg-white/5 border-white/10 focus:border-gold"
+   490→   490→                      required
+   491→   491→                    />
+   492→   492→                  </div>
+   493→   493→                </div>
+   494→   494→
+   495→   495→                <div className="space-y-2">
+   496→   496→                  <Label htmlFor="regUsername" className="text-sm text-muted-foreground">Username</Label>
+   497→   497→                  <div className="relative">
+   498→   498→                    <UserPlus className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+   499→   499→                    <Input
+   500→   500→                      id="regUsername"
+   501→   501→                      type="text"
+   502→   502→                      placeholder="Choose a username"
+   503→   503→                      value={username}
+   504→   504→                      onChange={(e) => setUsername(e.target.value)}
+   505→   505→                      className="pl-10 bg-white/5 border-white/10 focus:border-gold"
+   506→   506→                      required
+   507→   507→                    />
+   508→   508→                  </div>
+   509→   509→                </div>
+   510→   510→
+   511→   511→                <div className="space-y-2">
+   512→   512→                  <Label htmlFor="regEmail" className="text-sm text-muted-foreground">Email</Label>
+   513→   513→                  <div className="relative">
+   514→   514→                    <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+   515→   515→                    <Input
+   516→   516→                      id="regEmail"
+   517→   517→                      type="email"
+   518→   518→                      placeholder="Enter email address"
+   519→   519→                      value={email}
+   520→   520→                      onChange={(e) => setEmail(e.target.value)}
+   521→   521→                      className="pl-10 bg-white/5 border-white/10 focus:border-gold"
+   522→   522→                      required
+   523→   523→                    />
+   524→   524→                  </div>
+   525→   525→                </div>
+   526→   526→
+   527→   527→                <div className="space-y-2">
+   528→   528→                  <Label htmlFor="regPhone" className="text-sm text-muted-foreground">Phone Number</Label>
+   529→   529→                  <div className="relative">
+   530→   530→                    <Phone className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+   531→   531→                    <Input
+   532→   532→                      id="regPhone"
+   533→   533→                      type="tel"
+   534→   534→                      placeholder="Enter phone number"
+   535→   535→                      value={phone}
+   536→   536→                      onChange={(e) => setPhone(e.target.value)}
+   537→   537→                      className="pl-10 bg-white/5 border-white/10 focus:border-gold"
+   538→   538→                      required
+   539→   539→                    />
+   540→   540→                  </div>
+   541→   541→                </div>
+   542→   542→
+   543→   543→                <div className="space-y-2">
+   544→   544→                  <Label htmlFor="regPw" className="text-sm text-muted-foreground">Password</Label>
+   545→   545→                  <div className="relative">
+   546→   546→                    <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+   547→   547→                    <Input
+   548→   548→                      id="regPw"
+   549→   549→                      type={showRegPw ? 'text' : 'password'}
+   550→   550→                      placeholder="Create password"
+   551→   551→                      value={password}
+   552→   552→                      onChange={(e) => setPassword(e.target.value)}
+   553→   553→                      className="pl-10 pr-10 bg-white/5 border-white/10 focus:border-gold"
+   554→   554→                      required
+   555→   555→                    />
+   556→   556→                    <button
+   557→   557→                      type="button"
+   558→   558→                      onClick={() => setShowRegPw(!showRegPw)}
+   559→   559→                      className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
+   560→   560→                    >
+   561→   561→                      {showRegPw ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+   562→   562→                    </button>
+   563→   563→                  </div>
+   564→   564→                </div>
+   565→   565→
+   566→   566→                <div className="space-y-2">
+   567→   567→                  <Label htmlFor="regConfirmPw" className="text-sm text-muted-foreground">Confirm Password</Label>
+   568→   568→                  <div className="relative">
+   569→   569→                    <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+   570→   570→                    <Input
+   571→   571→                      id="regConfirmPw"
+   572→   572→                      type={showRegPw ? 'text' : 'password'}
+   573→   573→                      placeholder="Confirm password"
+   574→   574→                      value={confirmPassword}
+   575→   575→                      onChange={(e) => setConfirmPassword(e.target.value)}
+   576→   576→                      className="pl-10 bg-white/5 border-white/10 focus:border-gold"
+   577→   577→                      required
+   578→   578→                    />
+   579→   579→                  </div>
+   580→   580→                </div>
+   581→   581→
+   582→   582→                <div className="space-y-2">
+   583→   583→                  <Label htmlFor="regReferral" className="text-sm text-muted-foreground">Referral Code <span className="text-muted-foreground/60">(optional)</span></Label>
+   584→   584→                  <div className="relative">
+   585→   585→                    <UserPlus className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+   586→   586→                    <Input
+   587→   587→                      id="regReferral"
+   588→   588→                      type="text"
+   589→   589→                      placeholder="Enter referral code"
+   590→   590→                      value={referralCode}
+   591→   591→                      onChange={(e) => setReferralCode(e.target.value)}
+   592→   592→                      className="pl-10 bg-white/5 border-white/10 focus:border-gold"
+   593→   593→                    />
+   594→   594→                  </div>
+   595→   595→                </div>
+   596→   596→
+   597→   597→                <Button
+   598→   598→                  type="submit"
+   599→   599→                  disabled={regLoading}
+   600→   600→                  className="w-full gradient-gold text-gold-foreground font-semibold h-12 hover:opacity-90 transition-opacity mt-2"
+   601→   601→                >
+   602→   602→                  {regLoading ? (
+   603→   603→                    <motion.div
+   604→   604→                      animate={{ rotate: 360 }}
+   605→   605→                      transition={{ repeat: Infinity, duration: 1, ease: 'linear' }}
+   606→   606→                      className="w-5 h-5 border-2 border-gold-foreground/30 border-t-gold-foreground rounded-full"
+   607→   607→                    />
+   608→   608→                  ) : (
+   609→   609→                    <span className="flex items-center gap-2">Create Account <ArrowRight className="w-4 h-4" /></span>
+   610→   610→                  )}
+   611→   611→                </Button>
+   612→   612→
+   613→   613→                <p className="text-center text-sm text-muted-foreground">
+   614→   614→                  Already have an account?{' '}
+   615→   615→                  <button
+   616→   616→                    type="button"
+   617→   617→                    onClick={() => switchView('login')}
+   618→   618→                    className="text-gold hover:underline font-medium"
+   619→   619→                  >
+   620→   620→                    Sign In
+   621→   621→                  </button>
+   622→   622→                </p>
+   623→   623→              </motion.form>
+   624→   624→            )}
+   625→   625→          </AnimatePresence>
+   626→   626→        </div>
+   627→   627→      </div>
+   628→   628→    </div>
+   629→   629→  );
+   630→   630→}
+   631→   631→
