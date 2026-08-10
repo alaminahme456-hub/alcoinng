@@ -165,7 +165,7 @@ function MarketView() {
   // Trade execution
   const [trading, setTrading] = useState(false);
   const [tradePhase, setTradePhase] = useState<'idle' | 'confirmed' | 'monitoring' | 'result'>('idle');
-  const [tradeResult, setTradeResult] = useState<{ win: boolean; profit: number; totalReturn: number; message: string; multiplier: number } | null>(null);
+  const [tradeResult, setTradeResult] = useState<{ win: boolean; profit: number; totalReturn: number; message: string; multiplier: number; amount?: number } | null>(null);
 
   // Monitor screen data (stored in ref to avoid stale closures)
   const monitorInfoRef = useRef<{
@@ -316,6 +316,8 @@ function MarketView() {
   const pendingTradeResult = useRef<any>(null);
   const [, forceUpdate] = useState(0);
   const tradeStartTimeRef = useRef<number>(0);
+  const tradingRef = useRef(false);
+  const resultAutoReturnRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const startCountdown = useCallback((seconds: number) => {
     if (countdownRef.current) {
@@ -339,6 +341,7 @@ function MarketView() {
           pendingTradeResult.current = null;
           setTradeResult(result);
           setTradePhase('result');
+          tradingRef.current = false;
           toast.success(
             result.win ? `Trade Won! +${formatNaira(result.profit)}` : 'Trade Lost',
             { description: result.message || '' }
@@ -347,6 +350,15 @@ function MarketView() {
           fetchHistory();
           refreshWallets();
           forceUpdate((n) => n + 1);
+
+          // Auto-return to Place Trade after 3 seconds
+          if (resultAutoReturnRef.current) clearTimeout(resultAutoReturnRef.current);
+          resultAutoReturnRef.current = setTimeout(() => {
+            setTradeResult(null);
+            setTradePhase('idle');
+            monitorInfoRef.current = null;
+            resultAutoReturnRef.current = null;
+          }, 3000);
         }
       }
     }, 1000);
@@ -364,6 +376,7 @@ function MarketView() {
   useEffect(() => {
     return () => {
       if (countdownRef.current) clearInterval(countdownRef.current);
+      if (resultAutoReturnRef.current) clearTimeout(resultAutoReturnRef.current);
     };
   }, []);
 
@@ -385,10 +398,12 @@ function MarketView() {
 
     // Clean slate
     setTrading(true);
+    tradingRef.current = true;
     setTradePhase('confirmed');
     setTradeResult(null);
     pendingTradeResult.current = null;
     monitorInfoRef.current = null;
+    if (resultAutoReturnRef.current) { clearTimeout(resultAutoReturnRef.current); resultAutoReturnRef.current = null; }
     stopCountdown();
 
     try {
@@ -414,6 +429,7 @@ function MarketView() {
         totalReturn: Number(totalReturn) || 0,
         multiplier: Number(multiplierUsed) || 1,
         message: data.message || (isWin ? 'Trade successful!' : 'Better luck next time.'),
+        amount: amountNum,
       };
 
       // Store monitor info
@@ -442,7 +458,7 @@ function MarketView() {
         // Start countdown, transition confirmed → monitoring after 1.5s
         startCountdown(duration);
         setTimeout(() => {
-          if (trading) setTradePhase('monitoring');
+          if (tradingRef.current) setTradePhase('monitoring');
         }, 1500);
         pendingTradeResult.current = precomputed;
       }
@@ -451,6 +467,7 @@ function MarketView() {
       pendingTradeResult.current = null;
       monitorInfoRef.current = null;
       setTrading(false);
+      tradingRef.current = false;
       setTradePhase('idle');
       toast.error(err.message || 'Trade failed');
     }
@@ -946,7 +963,7 @@ function MarketView() {
 
                 {/* Back to Dashboard */}
                 <button
-                  onClick={() => { stopCountdown(); pendingTradeResult.current = null; setTrading(false); setTradePhase('idle'); monitorInfoRef.current = null; setView('dashboard'); }}
+                  onClick={() => { stopCountdown(); pendingTradeResult.current = null; if (resultAutoReturnRef.current) { clearTimeout(resultAutoReturnRef.current); resultAutoReturnRef.current = null; } setTrading(false); tradingRef.current = false; setTradePhase('idle'); monitorInfoRef.current = null; setView('dashboard'); }}
                   className="w-full h-11 rounded-xl bg-white/5 border border-white/10 text-sm font-medium flex items-center justify-center gap-2 hover:bg-white/10 transition-colors"
                 >
                   <Home className="w-4 h-4" />
@@ -957,7 +974,7 @@ function MarketView() {
           )}
         </AnimatePresence>
 
-        {/* ═══════ Trade Result Overlay (shows final multiplier) ═══════ */}
+        {/* ═══════ PHASE 4: Trade Result ═══════ */}
         <AnimatePresence>
           {tradePhase === 'result' && tradeResult && (
             <motion.div
@@ -965,7 +982,6 @@ function MarketView() {
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
               className="fixed inset-0 z-50 bg-black/85 backdrop-blur-md flex items-center justify-center p-4"
-              onClick={() => { setTradeResult(null); }}
             >
               <motion.div
                 initial={{ scale: 0.5, opacity: 0 }}
@@ -975,7 +991,6 @@ function MarketView() {
                 className={`glass-strong rounded-2xl p-8 max-w-sm w-full text-center border ${
                   tradeResult.win ? 'border-emerald-500/30' : 'border-red-500/30'
                 }`}
-                onClick={(e) => e.stopPropagation()}
               >
                 <motion.div
                   initial={{ scale: 0, rotate: -180 }}
@@ -1017,11 +1032,11 @@ function MarketView() {
                     initial={{ opacity: 0, y: 10 }}
                     animate={{ opacity: 1, y: 0 }}
                     transition={{ delay: 0.4 }}
-                    className="glass rounded-lg p-3 text-sm space-y-1.5 mb-6"
+                    className="glass rounded-lg p-3 text-sm space-y-1.5 mb-4"
                   >
                     <div className="flex justify-between">
                       <span className="text-muted-foreground">Investment</span>
-                      <span className="font-medium">{formatNaira(amountNum)}</span>
+                      <span className="font-medium">{formatNaira(tradeResult.amount ?? amountNum)}</span>
                     </div>
                     <div className="flex justify-between">
                       <span className="text-muted-foreground">Multiplier</span>
@@ -1041,14 +1056,26 @@ function MarketView() {
                     initial={{ opacity: 0, y: 10 }}
                     animate={{ opacity: 1, y: 0 }}
                     transition={{ delay: 0.4 }}
-                    className={`text-4xl font-bold font-mono mb-6 text-red-400`}
+                    className="text-4xl font-bold font-mono mb-4 text-red-400"
                   >
-                    -{formatNaira(amountNum)}
+                    -{formatNaira(tradeResult.amount ?? amountNum)}
                   </motion.div>
                 )}
 
+                {/* Trade ID */}
+                {monitorInfoRef.current && (
+                  <p className="text-[10px] text-muted-foreground tracking-wider mb-4">
+                    Trade #{monitorInfoRef.current.tradeId}
+                  </p>
+                )}
+
                 <Button
-                  onClick={() => { setTradeResult(null); setTradePhase('idle'); monitorInfoRef.current = null; }}
+                  onClick={() => {
+                    if (resultAutoReturnRef.current) { clearTimeout(resultAutoReturnRef.current); resultAutoReturnRef.current = null; }
+                    setTradeResult(null);
+                    setTradePhase('idle');
+                    monitorInfoRef.current = null;
+                  }}
                   className={`w-full font-semibold h-11 ${
                     tradeResult.win
                       ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 hover:bg-emerald-500/30'
@@ -1057,6 +1084,8 @@ function MarketView() {
                 >
                   Continue Trading
                 </Button>
+
+                <p className="text-[10px] text-muted-foreground mt-3">Auto-returns in 3 seconds...</p>
               </motion.div>
             </motion.div>
           )}
@@ -1145,7 +1174,7 @@ function MarketView() {
                         {formatNaira(trade.amount)}
                       </TableCell>
                       <TableCell className="text-xs text-muted-foreground text-right py-2">
-                        {(trade.multiplier ?? trade.payout_multiplier ?? 1).toFixed(2)}x
+                        {(trade.multiplier ?? 1).toFixed(2)}x
                       </TableCell>
                       <TableCell className="text-xs text-muted-foreground text-right py-2">
                         {DURATION_OPTIONS.find((d) => d.value === trade.duration)?.label || `${trade.duration}s`}
