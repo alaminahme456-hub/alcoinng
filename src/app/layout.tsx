@@ -52,6 +52,7 @@ export default function RootLayout({
     <html lang="en" className="dark">
       <head>
         <link rel="apple-touch-icon" href="/icon-192x192.jpg" />
+        <meta name="google-adsense-account" content="ca-pub-9016878264107871" />
         <Script
           src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-9016878264107871"
           strategy="afterInteractive"
