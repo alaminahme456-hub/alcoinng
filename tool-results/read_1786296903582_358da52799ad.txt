@@ -1,0 +1,1021 @@
+     1→'use client';
+     2→
+     3→import { Component, useEffect, useState, useCallback, useRef, type ReactNode, type ErrorInfo } from 'react';
+     4→import { motion, AnimatePresence } from 'framer-motion';
+     5→import { useAppStore, apiFetch } from '@/store';
+     6→import { Button } from '@/components/ui/button';
+     7→import { Input } from '@/components/ui/input';
+     8→import { Badge } from '@/components/ui/badge';
+     9→import { Skeleton } from '@/components/ui/skeleton';
+    10→import {
+    11→  Select,
+    12→  SelectContent,
+    13→  SelectItem,
+    14→  SelectTrigger,
+    15→  SelectValue,
+    16→} from '@/components/ui/select';
+    17→import {
+    18→  Table,
+    19→  TableBody,
+    20→  TableCell,
+    21→  TableHead,
+    22→  TableHeader,
+    23→  TableRow,
+    24→} from '@/components/ui/table';
+    25→import { toast } from 'sonner';
+    26→import {
+    27→  ArrowLeft, TrendingUp, Wallet, PiggyBank, TrendingUpIcon,
+    28→  ArrowUpCircle, ArrowDownCircle, Loader2,
+    29→  Trophy, XCircle, CheckCircle2, Clock, History, Filter,
+    30→} from 'lucide-react';
+    31→import {
+    32→  XAxis,
+    33→  YAxis,
+    34→  CartesianGrid,
+    35→  Tooltip,
+    36→  ResponsiveContainer,
+    37→  Area,
+    38→  AreaChart,
+    39→} from 'recharts';
+    40→
+    41→function formatNaira(amount: any) {
+    42→  const num = Number(amount);
+    43→  if (isNaN(num)) return '\u20a60';
+    44→  return `\u20a6${num.toLocaleString()}`;
+    45→}
+    46→
+    47→interface PricePoint {
+    48→  time: string;
+    49→  price: number;
+    50→  timestamp: number;
+    51→}
+    52→
+    53→interface TradeHistoryItem {
+    54→  id: string;
+    55→  prediction: 'UP' | 'DOWN';
+    56→  amount: number;
+    57→  multiplier: number;
+    58→  duration: number;
+    59→  result: 'win' | 'loss';
+    60→  profit: number;
+    61→  createdAt: string;
+    62→  entryPrice: number;
+    63→  exitPrice: number;
+    64→}
+    65→
+    66→type WalletType = 'reward' | 'deposit' | 'profit';
+    67→type Prediction = 'UP' | 'DOWN' | null;
+    68→
+    69→const DURATION_OPTIONS = [
+    70→  { label: '10 Seconds', value: 10 },
+    71→  { label: '30 Seconds', value: 30 },
+    72→  { label: '1 Minute', value: 60 },
+    73→  { label: '2 Minutes', value: 120 },
+    74→  { label: '5 Minutes', value: 300 },
+    75→  { label: '10 Minutes', value: 600 },
+    76→];
+    77→
+    78→const WALLET_CONFIG: Record<WalletType, { label: string; icon: typeof Wallet; color: string; balanceKey: 'reward' | 'deposit' | 'profit' }> = {
+    79→  reward: { label: 'Reward Wallet', icon: Wallet, color: 'text-gold', balanceKey: 'reward' },
+    80→  deposit: { label: 'Deposit Wallet', icon: PiggyBank, color: 'text-alcoin-blue', balanceKey: 'deposit' },
+    81→  profit: { label: 'Profit Wallet', icon: TrendingUpIcon, color: 'text-emerald-400', balanceKey: 'profit' },
+    82→};
+    83→
+    84→const HISTORY_FILTERS = [
+    85→  { label: 'All', value: 'all' },
+    86→  { label: 'Wins', value: 'win' },
+    87→  { label: 'Losses', value: 'loss' },
+    88→];
+    89→
+    90→// Local error boundary — prevents app-level crash from showing error.tsx
+    91→class MarketErrorBoundary extends Component<
+    92→  { children: ReactNode },
+    93→  { hasError: boolean; error: Error | null }
+    94→> {
+    95→  constructor(props: { children: ReactNode }) {
+    96→    super(props);
+    97→    this.state = { hasError: false, error: null };
+    98→  }
+    99→  static getDerivedStateFromError(error: Error) {
+   100→    return { hasError: true, error };
+   101→  }
+   102→  componentDidCatch(error: Error, info: ErrorInfo) {
+   103→    console.error('MarketView error boundary caught:', error, info);
+   104→  }
+   105→  render() {
+   106→    if (this.state.hasError) {
+   107→      return (
+   108→        <div className="min-h-screen flex flex-col items-center justify-center bg-background text-foreground p-4">
+   109→          <div className="max-w-md w-full text-center space-y-4">
+   110→            <div className="w-16 h-16 rounded-full bg-destructive/10 flex items-center justify-center mx-auto">
+   111→              <XCircle className="w-8 h-8 text-destructive" />
+   112→            </div>
+   113→            <h2 className="text-lg font-bold">Trade Error</h2>
+   114→            <p className="text-sm text-muted-foreground">
+   115→              {this.state.error?.message || 'Something went wrong with the market.'}
+   116→            </p>
+   117→            <Button
+   118→              onClick={() => { this.setState({ hasError: false, error: null }); }}
+   119→              className="gradient-gold text-gold-foreground font-semibold"
+   120→            >
+   121→              Try Again
+   122→            </Button>
+   123→          </div>
+   124→        </div>
+   125→      );
+   126→    }
+   127→    return this.props.children;
+   128→  }
+   129→}
+   130→
+   131→export default function MarketViewWrapper() {
+   132→  return (
+   133→    <MarketErrorBoundary>
+   134→      <MarketView />
+   135→    </MarketErrorBoundary>
+   136→  );
+   137→}
+   138→
+   139→function MarketView() {
+   140→  const { wallets, setWallets, setView } = useAppStore();
+   141→
+   142→  // Chart data — client-side AI price simulation
+   143→  const [priceData, setPriceData] = useState<PricePoint[]>([]);
+   144→  const [currentPrice, setCurrentPrice] = useState<number | null>(null);
+   145→  const [prevPrice, setPrevPrice] = useState<number | null>(null);
+   146→  const [chartLoading, setChartLoading] = useState(true);
+   147→  const priceIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+   148→
+   149→  // AI price simulation state
+   150→  const priceSimRef = useRef({
+   151→    price: 75 + Math.random() * 25,
+   152→    momentum: 0,
+   153→    volatility: 0.5,
+   154→    trend: 0,
+   155→    tickCount: 0,
+   156→  });
+   157→
+   158→  // Trade form
+   159→  const [selectedWallet, setSelectedWallet] = useState<WalletType>('deposit');
+   160→  const [prediction, setPrediction] = useState<Prediction>(null);
+   161→  const [tradeAmount, setTradeAmount] = useState('');
+   162→  const [duration, setDuration] = useState<number>(30);
+   163→
+   164→  // Trade execution
+   165→  const [trading, setTrading] = useState(false);
+   166→  const [tradeResult, setTradeResult] = useState<{ win: boolean; profit: number; totalReturn: number; message: string; multiplier: number } | null>(null);
+   167→
+   168→  // History
+   169→  const [history, setHistory] = useState<TradeHistoryItem[]>([]);
+   170→  const [historyLoading, setHistoryLoading] = useState(true);
+   171→  const [historyFilter, setHistoryFilter] = useState('all');
+   172→
+   173→  // Generate AI-driven price tick with momentum, trend, mean-reversion & volatility clustering
+   174→  const generatePriceTick = useCallback(() => {
+   175→    const sim = priceSimRef.current;
+   176→    sim.tickCount++;
+   177→
+   178→    // Shift trend slowly every ~20 ticks
+   179→    if (sim.tickCount % 20 === 0) {
+   180→      sim.trend = (Math.random() - 0.5) * 0.6;
+   181→    }
+   182→
+   183→    // GARCH-like volatility clustering
+   184→    const volTarget = 0.4 + Math.random() * 0.8;
+   185→    sim.volatility = 0.85 * sim.volatility + 0.15 * volTarget;
+   186→
+   187→    // Mean-reversion pull toward 75-85 range
+   188→    const meanTarget = 80;
+   189→    const meanPull = (meanTarget - sim.price) * 0.002;
+   190→
+   191→    // Random shock + momentum + trend + mean reversion
+   192→    const shock = (Math.random() - 0.5) * 2 * sim.volatility;
+   193→    sim.momentum = 0.7 * sim.momentum + 0.3 * (shock + sim.trend);
+   194→
+   195→    const delta = sim.momentum + meanPull;
+   196→    sim.price = Math.max(10, Math.min(200, sim.price + delta));
+   197→
+   198→    return Math.round(sim.price * 100) / 100;
+   199→  }, []);
+   200→
+   201→  // Initialize chart with 60 historical points, then tick every 1.5s
+   202→  const initChart = useCallback(() => {
+   203→    const sim = priceSimRef.current;
+   204→    const points: PricePoint[] = [];
+   205→    const now = Date.now();
+   206→    for (let i = 59; i >= 0; i--) {
+   207→      // Generate a tick for each historical point
+   208→      const vol = 0.3 + Math.random() * 0.5;
+   209→      const change = (Math.random() - 0.48) * vol * 2;
+   210→      sim.momentum = 0.6 * sim.momentum + 0.4 * change;
+   211→      sim.price = Math.max(10, Math.min(200, sim.price + sim.momentum));
+   212→      const price = Math.round(sim.price * 100) / 100;
+   213→      points.push({
+   214→        time: new Date(now - i * 2000).toLocaleTimeString('en-US', {
+   215→          hour12: false,
+   216→          hour: '2-digit',
+   217→          minute: '2-digit',
+   218→          second: '2-digit',
+   219→        }),
+   220→        price,
+   221→        timestamp: now - i * 2000,
+   222→      });
+   223→    }
+   224→    setPriceData(points);
+   225→    setCurrentPrice(points[points.length - 1].price);
+   226→    setPrevPrice(points[points.length - 2].price);
+   227→    setChartLoading(false);
+   228→  }, []);
+   229→
+   230→  const fetchHistory = useCallback(async () => {
+   231→    try {
+   232→      setHistoryLoading(true);
+   233→      const data = await apiFetch('/api/market/history');
+   234→      const rawTrades = data.trades || [];
+   235→      // Map DB columns to frontend interface
+   236→      const mapped: TradeHistoryItem[] = rawTrades.map((t: any) => ({
+   237→        id: t.id,
+   238→        prediction: (t.prediction === 'buy' ? 'UP' : 'DOWN') as 'UP' | 'DOWN',
+   239→        amount: Number(t.amount),
+   240→        multiplier: Number(t.payout_multiplier ?? t.multiplier ?? 1),
+   241→        duration: Number(t.duration),
+   242→        result: t.result as 'win' | 'loss',
+   243→        profit: Number(t.profit ?? 0),
+   244→        createdAt: t.created_at,
+   245→        entryPrice: Number(t.start_price),
+   246→        exitPrice: Number(t.end_price),
+   247→      }));
+   248→      setHistory(mapped);
+   249→    } catch {
+   250→      // silent
+   251→    } finally {
+   252→      setHistoryLoading(false);
+   253→    }
+   254→  }, []);
+   255→
+   256→  const refreshWallets = useCallback(async () => {
+   257→    try {
+   258→      const data = await apiFetch('/api/user/wallets');
+   259→      if (data) {
+   260→        const getBal = (w: any) => typeof w === 'object' && w !== null ? (w.balance ?? 0) : (w ?? 0);
+   261→        setWallets({ reward: getBal(data.reward), deposit: getBal(data.deposit), profit: getBal(data.profit) });
+   262→      }
+   263→    } catch {
+   264→      // silent
+   265→    }
+   266→  }, [setWallets]);
+   267→
+   268→  // Initialize chart with historical data
+   269→  useEffect(() => {
+   270→    initChart();
+   271→    fetchHistory();
+   272→  }, [initChart, fetchHistory]);
+   273→
+   274→  // Tick new price every 1.5 seconds
+   275→  useEffect(() => {
+   276→    priceIntervalRef.current = setInterval(() => {
+   277→      const newPrice = generatePriceTick();
+   278→      const timeStr = new Date().toLocaleTimeString('en-US', {
+   279→        hour12: false,
+   280→        hour: '2-digit',
+   281→        minute: '2-digit',
+   282→        second: '2-digit',
+   283→      });
+   284→      setPrevPrice(currentPrice);
+   285→      setCurrentPrice(newPrice);
+   286→      setPriceData((prev) => {
+   287→        const next = [...prev, { time: timeStr, price: newPrice, timestamp: Date.now() }];
+   288→        return next.slice(-60);
+   289→      });
+   290→    }, 1500);
+   291→    return () => {
+   292→      if (priceIntervalRef.current) clearInterval(priceIntervalRef.current);
+   293→    };
+   294→  }, [generatePriceTick, currentPrice]);
+   295→
+   296→  // Derived values (must be before callbacks that reference them)
+   297→  const availableBalance = wallets[WALLET_CONFIG[selectedWallet].balanceKey];
+   298→  const amountNum = parseFloat(tradeAmount) || 0;
+   299→
+   300→  // Trade countdown — ref-based, avoids all stale closure issues
+   301→  const countdownRef = useRef<ReturnType<typeof setInterval> | null>(null);
+   302→  const countdownDisplayRef = useRef(0);
+   303→  const pendingTradeResult = useRef<any>(null);
+   304→  const [, forceUpdate] = useState(0);
+   305→
+   306→  const startCountdown = useCallback((seconds: number) => {
+   307→    if (countdownRef.current) {
+   308→      clearInterval(countdownRef.current);
+   309→      countdownRef.current = null;
+   310→    }
+   311→    countdownDisplayRef.current = seconds;
+   312→
+   313→    countdownRef.current = setInterval(() => {
+   314→      countdownDisplayRef.current -= 1;
+   315→      forceUpdate((n) => n + 1);
+   316→      if (countdownDisplayRef.current <= 0) {
+   317→        if (countdownRef.current) {
+   318→          clearInterval(countdownRef.current);
+   319→          countdownRef.current = null;
+   320→        }
+   321→        countdownDisplayRef.current = 0;
+   322→        // Read pre-computed result from ref — no closure dependency on state
+   323→        const result = pendingTradeResult.current;
+   324→        if (result) {
+   325→          pendingTradeResult.current = null;
+   326→          setTradeResult(result);
+   327→          toast.success(
+   328→            result.win ? `Trade Won! +${formatNaira(result.profit)}` : 'Trade Lost',
+   329→            { description: result.message || '' }
+   330→          );
+   331→          setTrading(false);
+   332→          fetchHistory();
+   333→          refreshWallets();
+   334→          forceUpdate((n) => n + 1);
+   335→        }
+   336→      }
+   337→    }, 1000);
+   338→  }, [fetchHistory, refreshWallets]);
+   339→
+   340→  const stopCountdown = useCallback(() => {
+   341→    if (countdownRef.current) {
+   342→      clearInterval(countdownRef.current);
+   343→      countdownRef.current = null;
+   344→    }
+   345→    countdownDisplayRef.current = 0;
+   346→  }, []);
+   347→
+   348→  // Cleanup on unmount
+   349→  useEffect(() => {
+   350→    return () => {
+   351→      if (countdownRef.current) clearInterval(countdownRef.current);
+   352→    };
+   353→  }, []);
+   354→
+   355→  const formatCountdown = (seconds: number) => {
+   356→    const m = Math.floor(seconds / 60);
+   357→    const s = seconds % 60;
+   358→    if (m > 0) return `${m}:${s.toString().padStart(2, '0')}`;
+   359→    return `0:${s.toString().padStart(2, '0')}`;
+   360→  };
+   361→
+   362→  const handleTrade = async () => {
+   363→    if (!prediction || amountNum <= 0) return;
+   364→    if (amountNum > availableBalance) {
+   365→      toast.error('Insufficient balance', {
+   366→        description: `Your ${WALLET_CONFIG[selectedWallet].label} has ${formatNaira(availableBalance)}`,
+   367→      });
+   368→      return;
+   369→    }
+   370→
+   371→    // Clean slate
+   372→    setTrading(true);
+   373→    setTradeResult(null);
+   374→    pendingTradeResult.current = null;
+   375→    stopCountdown();
+   376→
+   377→    // Start the visual countdown
+   378→    startCountdown(duration);
+   379→
+   380→    try {
+   381→      const data = await apiFetch('/api/market/trade', {
+   382→        method: 'POST',
+   383→        body: JSON.stringify({
+   384→          wallet: selectedWallet,
+   385→          prediction: prediction === 'UP' ? 'buy' : 'sell',
+   386→          amount: amountNum,
+   387→          duration,
+   388→        }),
+   389→      });
+   390→
+   391→      // Pre-compute the display result NOW (while amountNum is current)
+   392→      const isWin = data.trade?.result === 'win';
+   393→      const multiplierUsed = Number(data.trade?.payout_multiplier) || 1.0;
+   394→      const totalReturn = isWin ? Math.round(amountNum * multiplierUsed * 100) / 100 : 0;
+   395→      const profit = isWin ? Math.round((totalReturn - amountNum) * 100) / 100 : 0;
+   396→
+   397→      const precomputed = {
+   398→        win: isWin,
+   399→        profit: Number(profit) || 0,
+   400→        totalReturn: Number(totalReturn) || 0,
+   401→        multiplier: Number(multiplierUsed) || 1,
+   402→        message: data.message || (isWin ? 'Trade successful!' : 'Better luck next time.'),
+   403→      };
+   404→
+   405→      // If countdown already finished, show immediately
+   406→      if (countdownDisplayRef.current <= 0) {
+   407→        setTradeResult(precomputed);
+   408→        toast.success(isWin ? `Trade Won! +${formatNaira(profit)}` : 'Trade Lost');
+   409→        setTrading(false);
+   410→        refreshWallets();
+   411→        fetchHistory();
+   412→      } else {
+   413→        // Store pre-computed result for the countdown to pick up
+   414→        pendingTradeResult.current = precomputed;
+   415→      }
+   416→    } catch (err: any) {
+   417→      stopCountdown();
+   418→      pendingTradeResult.current = null;
+   419→      setTrading(false);
+   420→      toast.error(err.message || 'Trade failed');
+   421→    }
+   422→  };
+   423→
+   424→  const filteredHistory = historyFilter === 'all'
+   425→    ? history
+   426→    : history.filter((t) => t.result === historyFilter);
+   427→
+   428→  // Custom chart tooltip
+   429→  const CustomTooltip = ({ active, payload }: any) => {
+   430→    if (active && payload && payload.length) {
+   431→      return (
+   432→        <div className="glass-strong rounded-lg p-2 text-xs border border-white/10">
+   433→          <p className="text-muted-foreground">{payload[0].payload.time}</p>
+   434→          <p className="font-semibold text-gold">{formatNaira(payload[0].value)}</p>
+   435→        </div>
+   436→      );
+   437→    }
+   438→    return null;
+   439→  };
+   440→
+   441→  const priceChange = prevPrice !== null && currentPrice !== null
+   442→    ? currentPrice - prevPrice
+   443→    : 0;
+   444→  const priceUp = priceChange >= 0;
+   445→
+   446→  return (
+   447→    <div className="min-h-screen pb-8">
+   448→      {/* Header */}
+   449→      <header className="sticky top-0 z-30 glass-strong px-4 py-3 flex items-center gap-3">
+   450→        <button
+   451→          onClick={() => setView('dashboard')}
+   452→          className="w-10 h-10 rounded-xl glass flex items-center justify-center hover:bg-white/10 transition-colors"
+   453→        >
+   454→          <ArrowLeft className="w-5 h-5" />
+   455→        </button>
+   456→        <div className="flex items-center gap-2">
+   457→          <div className="w-8 h-8 rounded-lg gradient-gold flex items-center justify-center">
+   458→            <TrendingUp className="w-4 h-4 text-gold-foreground" />
+   459→          </div>
+   460→          <h1 className="font-semibold text-lg">AL Coin Market</h1>
+   461→        </div>
+   462→      </header>
+   463→
+   464→      <main className="px-4 pt-4 max-w-2xl mx-auto space-y-4">
+   465→        {/* Price Chart */}
+   466→        <motion.div
+   467→          initial={{ opacity: 0, y: 20 }}
+   468→          animate={{ opacity: 1, y: 0 }}
+   469→          className="glass rounded-xl p-4"
+   470→        >
+   471→          <div className="flex items-center justify-between mb-3">
+   472→            <h2 className="text-sm font-semibold text-muted-foreground">Live Price Chart</h2>
+   473→            <div className="flex items-center gap-1.5">
+   474→              <div className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+   475→              <span className="text-[10px] text-muted-foreground">LIVE</span>
+   476→            </div>
+   477→          </div>
+   478→
+   479→          {chartLoading ? (
+   480→            <Skeleton className="h-48 rounded-lg bg-white/5" />
+   481→          ) : priceData.length === 0 ? (
+   482→            <div className="h-48 rounded-lg bg-white/5 flex items-center justify-center">
+   483→              <p className="text-sm text-muted-foreground">Waiting for price data...</p>
+   484→            </div>
+   485→          ) : (
+   486→            <div className="h-48 sm:h-56">
+   487→              <ResponsiveContainer width="100%" height="100%">
+   488→                <AreaChart data={priceData} margin={{ top: 5, right: 5, left: -20, bottom: 0 }}>
+   489→                  <defs>
+   490→                    <linearGradient id="priceGradientUp" x1="0" y1="0" x2="0" y2="1">
+   491→                      <stop offset="0%" stopColor="#34d399" stopOpacity={0.25} />
+   492→                      <stop offset="100%" stopColor="#34d399" stopOpacity={0} />
+   493→                    </linearGradient>
+   494→                    <linearGradient id="priceGradientDown" x1="0" y1="0" x2="0" y2="1">
+   495→                      <stop offset="0%" stopColor="#f87171" stopOpacity={0.25} />
+   496→                      <stop offset="100%" stopColor="#f87171" stopOpacity={0} />
+   497→                    </linearGradient>
+   498→                  </defs>
+   499→                  <CartesianGrid
+   500→                    strokeDasharray="3 3"
+   501→                    stroke="rgba(212, 175, 55, 0.08)"
+   502→                    vertical={false}
+   503→                  />
+   504→                  <XAxis
+   505→                    dataKey="time"
+   506→                    tick={{ fontSize: 10, fill: '#8888a0' }}
+   507→                    axisLine={{ stroke: 'rgba(255,255,255,0.06)' }}
+   508→                    tickLine={false}
+   509→                    interval="preserveStartEnd"
+   510→                  />
+   511→                  <YAxis
+   512→                    domain={['auto', 'auto']}
+   513→                    tick={{ fontSize: 10, fill: '#8888a0' }}
+   514→                    axisLine={{ stroke: 'rgba(255,255,255,0.06)' }}
+   515→                    tickLine={false}
+   516→                    tickFormatter={(v: any) => v != null ? `\u20a6${Number(v).toFixed(0)}` : ''}
+   517→                  />
+   518→                  <Tooltip content={<CustomTooltip />} />
+   519→                  <Area
+   520→                    type="monotone"
+   521→                    dataKey="price"
+   522→                    stroke={priceUp ? '#34d399' : priceChange !== 0 ? '#f87171' : '#d4af37'}
+   523→                    strokeWidth={2}
+   524→                    fill={priceUp ? 'url(#priceGradientUp)' : priceChange !== 0 ? 'url(#priceGradientDown)' : 'none'}
+   525→                    dot={false}
+   526→                    isAnimationActive={false}
+   527→                  />
+   528→                </AreaChart>
+   529→              </ResponsiveContainer>
+   530→            </div>
+   531→          )}
+   532→        </motion.div>
+   533→
+   534→        {/* Current Price Display */}
+   535→        <motion.div
+   536→          initial={{ opacity: 0, y: 20 }}
+   537→          animate={{ opacity: 1, y: 0 }}
+   538→          transition={{ delay: 0.05 }}
+   539→          className="glass rounded-xl p-4 text-center gold-glow"
+   540→        >
+   541→          <p className="text-xs text-muted-foreground mb-1">AL Coin Current Price</p>
+   542→          <AnimatePresence mode="wait">
+   543→            <motion.p
+   544→              key={currentPrice}
+   545→              initial={{ opacity: 0, y: 5 }}
+   546→              animate={{ opacity: 1, y: 0 }}
+   547→              exit={{ opacity: 0, y: -5 }}
+   548→              className={`text-3xl sm:text-4xl font-bold font-mono ${
+   549→                priceUp ? 'text-emerald-400' : priceChange !== 0 ? 'text-red-400' : 'gradient-gold-text'
+   550→              }`}
+   551→            >
+   552→              {currentPrice !== null ? formatNaira(currentPrice) : '---'}
+   553→            </motion.p>
+   554→          </AnimatePresence>
+   555→          {priceChange !== 0 && (
+   556→            <p className={`text-xs mt-1 font-medium ${priceUp ? 'text-emerald-400' : 'text-red-400'}`}>
+   557→              {priceUp ? '\u25b2' : '\u25bc'} {priceUp ? '+' : ''}{formatNaira(Math.abs(priceChange))}
+   558→            </p>
+   559→          )}
+   560→        </motion.div>
+   561→
+   562→        {/* ═══════ Place Trade Panel ═══════ */}
+   563→        <motion.div
+   564→          initial={{ opacity: 0, y: 20 }}
+   565→          animate={{ opacity: 1, y: 0 }}
+   566→          transition={{ delay: 0.1 }}
+   567→          className="glass rounded-xl p-4 space-y-5"
+   568→        >
+   569→          <h2 className="font-semibold text-sm">Place Trade</h2>
+   570→
+   571→          {/* 1. Select Wallet — Dropdown */}
+   572→          <div className="space-y-2">
+   573→            <p className="text-xs text-muted-foreground">Select Wallet</p>
+   574→            <Select
+   575→              value={selectedWallet}
+   576→              onValueChange={(v) => setSelectedWallet(v as WalletType)}
+   577→            >
+   578→              <SelectTrigger className="w-full bg-white/5 border-white/10 focus:border-gold h-11">
+   579→                <div className="flex items-center gap-2">
+   580→                  {(() => {
+   581→                    const cfg = WALLET_CONFIG[selectedWallet];
+   582→                    return <>
+   583→                      <cfg.icon className={`w-4 h-4 ${cfg.color}`} />
+   584→                      <SelectValue />
+   585→                    </>;
+   586→                  })()}
+   587→                </div>
+   588→              </SelectTrigger>
+   589→              <SelectContent className="glass-strong border-white/10">
+   590→                {(Object.keys(WALLET_CONFIG) as WalletType[]).map((key) => {
+   591→                  const cfg = WALLET_CONFIG[key];
+   592→                  return (
+   593→                    <SelectItem key={key} value={key}>
+   594→                      <div className="flex items-center gap-2">
+   595→                        <cfg.icon className={`w-4 h-4 ${cfg.color}`} />
+   596→                        <span>{cfg.label}</span>
+   597→                        <span className="text-muted-foreground ml-auto">({formatNaira(wallets[cfg.balanceKey])})</span>
+   598→                      </div>
+   599→                    </SelectItem>
+   600→                  );
+   601→                })}
+   602→              </SelectContent>
+   603→            </Select>
+   604→            <p className="text-[11px] text-muted-foreground">
+   605→              Balance: <span className="text-foreground font-medium">{formatNaira(availableBalance)}</span>
+   606→            </p>
+   607→          </div>
+   608→
+   609→          {/* 2. Prediction — Buy / Sell */}
+   610→          <div className="space-y-2">
+   611→            <p className="text-xs text-muted-foreground">Prediction</p>
+   612→            <div className="grid grid-cols-2 gap-3">
+   613→              <motion.button
+   614→                whileTap={{ scale: 0.97 }}
+   615→                onClick={() => setPrediction(prediction === 'UP' ? null : 'UP')}
+   616→                className={`rounded-lg p-2.5 flex items-center gap-2 transition-all border-2 ${
+   617→                  prediction === 'UP'
+   618→                    ? 'bg-emerald-500/15 border-emerald-500/50'
+   619→                    : 'glass border-transparent hover:border-emerald-500/20'
+   620→                }`}
+   621→              >
+   622→                <ArrowUpCircle className={`w-5 h-5 ${prediction === 'UP' ? 'text-emerald-400' : 'text-muted-foreground'}`} />
+   623→                <span className={`text-xs font-bold ${prediction === 'UP' ? 'text-emerald-400' : 'text-muted-foreground'}`}>
+   624→                  Buy
+   625→                </span>
+   626→                <span className={`text-[10px] ${prediction === 'UP' ? 'text-emerald-400/70' : 'text-muted-foreground/60'}`}>
+   627→                  UP
+   628→                </span>
+   629→              </motion.button>
+   630→
+   631→              <motion.button
+   632→                whileTap={{ scale: 0.97 }}
+   633→                onClick={() => setPrediction(prediction === 'DOWN' ? null : 'DOWN')}
+   634→                className={`rounded-lg p-2.5 flex items-center gap-2 transition-all border-2 ${
+   635→                  prediction === 'DOWN'
+   636→                    ? 'bg-red-500/15 border-red-500/50'
+   637→                    : 'glass border-transparent hover:border-red-500/20'
+   638→                }`}
+   639→              >
+   640→                <ArrowDownCircle className={`w-5 h-5 ${prediction === 'DOWN' ? 'text-red-400' : 'text-muted-foreground'}`} />
+   641→                <span className={`text-xs font-bold ${prediction === 'DOWN' ? 'text-red-400' : 'text-muted-foreground'}`}>
+   642→                  Sell
+   643→                </span>
+   644→                <span className={`text-[10px] ${prediction === 'DOWN' ? 'text-red-400/70' : 'text-muted-foreground/60'}`}>
+   645→                  DOWN
+   646→                </span>
+   647→              </motion.button>
+   648→            </div>
+   649→          </div>
+   650→
+   651→          {/* 3. Investment Amount */}
+   652→          <div className="space-y-2">
+   653→            <p className="text-xs text-muted-foreground">Investment</p>
+   654→            <div className="relative">
+   655→              <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-muted-foreground font-medium">
+   656→                \u20a6
+   657→              </span>
+   658→              <Input
+   659→                type="number"
+   660→                inputMode="decimal"
+   661→                placeholder="0"
+   662→                value={tradeAmount}
+   663→                onChange={(e) => setTradeAmount(e.target.value)}
+   664→                className="pl-8 pr-16 bg-white/5 border-white/10 focus:border-gold h-12 text-lg font-semibold"
+   665→                min="0"
+   666→                max={availableBalance}
+   667→              />
+   668→              <button
+   669→                type="button"
+   670→                onClick={() => setTradeAmount(availableBalance.toString())}
+   671→                className="absolute right-2 top-1/2 -translate-y-1/2 px-2 py-1 rounded text-[10px] font-medium text-gold bg-gold/10 hover:bg-gold/20 transition-colors"
+   672→              >
+   673→                MAX
+   674→              </button>
+   675→            </div>
+   676→            {amountNum > availableBalance && amountNum > 0 && (
+   677→              <p className="text-[11px] text-red-400">
+   678→                Amount exceeds your {WALLET_CONFIG[selectedWallet].label} balance of {formatNaira(availableBalance)}
+   679→              </p>
+   680→            )}
+   681→          </div>
+   682→
+   683→          {/* 4. Trade Duration */}
+   684→          <div className="space-y-2">
+   685→            <p className="text-xs text-muted-foreground">Trade Duration</p>
+   686→            <Select
+   687→              value={duration.toString()}
+   688→              onValueChange={(v) => setDuration(parseInt(v))}
+   689→            >
+   690→              <SelectTrigger className="w-full bg-white/5 border-white/10 focus:border-gold h-11">
+   691→                <Clock className="w-4 h-4 text-muted-foreground mr-2" />
+   692→                <SelectValue />
+   693→              </SelectTrigger>
+   694→              <SelectContent className="glass-strong border-white/10">
+   695→                {DURATION_OPTIONS.map((opt) => (
+   696→                  <SelectItem key={opt.value} value={opt.value.toString()}>
+   697→                    {opt.label}
+   698→                  </SelectItem>
+   699→                ))}
+   700→              </SelectContent>
+   701→            </Select>
+   702→          </div>
+   703→
+   704→          {/* Place Trade Button */}
+   705→          <Button
+   706→            onClick={handleTrade}
+   707→            disabled={!prediction || amountNum <= 0 || amountNum > availableBalance || trading}
+   708→            className="w-full gradient-gold text-gold-foreground font-bold h-13 text-base disabled:opacity-40 disabled:cursor-not-allowed"
+   709→          >
+   710→            {!prediction || amountNum <= 0 ? (
+   711→              'Select Prediction & Amount'
+   712→            ) : amountNum > availableBalance ? (
+   713→              'Insufficient Balance'
+   714→            ) : trading ? (
+   715→              <span className="flex items-center gap-2">
+   716→                <Loader2 className="w-5 h-5 animate-spin" />
+   717→                Trading...
+   718→              </span>
+   719→            ) : (
+   720→              `Place Trade \u2014 ${formatNaira(amountNum)}`
+   721→            )}
+   722→          </Button>
+   723→        </motion.div>
+   724→
+   725→        {/* ═══════ Trading Overlay (no multiplier shown) ═══════ */}
+   726→        <AnimatePresence>
+   727→          {trading && !tradeResult && (
+   728→            <motion.div
+   729→              initial={{ opacity: 0 }}
+   730→              animate={{ opacity: 1 }}
+   731→              exit={{ opacity: 0 }}
+   732→              className="fixed inset-0 z-50 bg-black/85 backdrop-blur-md flex items-center justify-center p-4"
+   733→            >
+   734→              <motion.div
+   735→                initial={{ scale: 0.9, opacity: 0 }}
+   736→                animate={{ scale: 1, opacity: 1 }}
+   737→                exit={{ scale: 0.9, opacity: 0 }}
+   738→                className="glass-strong rounded-2xl p-8 max-w-sm w-full text-center"
+   739→              >
+   740→                <div className={`w-24 h-24 rounded-full mx-auto mb-6 flex items-center justify-center ${
+   741→                  prediction === 'UP' ? 'bg-emerald-500/15' : 'bg-red-500/15'
+   742→                }`}>
+   743→                  <motion.div
+   744→                    animate={{ rotate: 360 }}
+   745→                    transition={{ repeat: Infinity, duration: 2, ease: 'linear' }}
+   746→                    className={`w-20 h-20 rounded-full border-4 border-t-transparent ${
+   747→                      prediction === 'UP' ? 'border-emerald-500/60' : 'border-red-500/60'
+   748→                    }`}
+   749→                  />
+   750→                  {prediction === 'UP' ? (
+   751→                    <ArrowUpCircle className="w-10 h-10 text-emerald-400 absolute" />
+   752→                  ) : (
+   753→                    <ArrowDownCircle className="w-10 h-10 text-red-400 absolute" />
+   754→                  )}
+   755→                </div>
+   756→
+   757→                <h3 className="text-xl font-bold mb-1">Trade in Progress</h3>
+   758→                <p className="text-sm text-muted-foreground mb-6">
+   759→                  Waiting for {DURATION_OPTIONS.find((d) => d.value === duration)?.label || `${duration}s`} to complete...
+   760→                </p>
+   761→
+   762→                <div className="text-6xl font-bold font-mono mb-4">
+   763→                  <span className={prediction === 'UP' ? 'text-emerald-400' : 'text-red-400'}>
+   764→                    {formatCountdown(Math.max(0, countdownDisplayRef.current))}
+   765→                  </span>
+   766→                </div>
+   767→
+   768→                <div className="w-full h-1.5 rounded-full bg-white/10 overflow-hidden">
+   769→                  <div
+   770→                    className={`h-full rounded-full transition-all duration-500 ${
+   771→                      prediction === 'UP' ? 'bg-emerald-500' : 'bg-red-500'
+   772→                    }`}
+   773→                    style={{ width: `${Math.max(0, ((duration - Math.max(0, countdownDisplayRef.current)) / duration) * 100)}%` }}
+   774→                  />
+   775→                </div>
+   776→
+   777→                <div className="mt-4 glass rounded-lg p-3 text-sm">
+   778→                  <div className="flex justify-between">
+   779→                    <span className="text-muted-foreground">Investment</span>
+   780→                    <span className="font-semibold">{formatNaira(amountNum)}</span>
+   781→                  </div>
+   782→                  <div className="flex justify-between mt-1">
+   783→                    <span className="text-muted-foreground">Prediction</span>
+   784→                    <span className={`font-semibold ${prediction === 'UP' ? 'text-emerald-400' : 'text-red-400'}`}>
+   785→                      {prediction === 'UP' ? 'BUY' : 'SELL'}
+   786→                    </span>
+   787→                  </div>
+   788→                </div>
+   789→              </motion.div>
+   790→            </motion.div>
+   791→          )}
+   792→        </AnimatePresence>
+   793→
+   794→        {/* ═══════ Trade Result Overlay (shows final multiplier) ═══════ */}
+   795→        <AnimatePresence>
+   796→          {tradeResult && (
+   797→            <motion.div
+   798→              initial={{ opacity: 0 }}
+   799→              animate={{ opacity: 1 }}
+   800→              exit={{ opacity: 0 }}
+   801→              className="fixed inset-0 z-50 bg-black/85 backdrop-blur-md flex items-center justify-center p-4"
+   802→              onClick={() => { setTradeResult(null); }}
+   803→            >
+   804→              <motion.div
+   805→                initial={{ scale: 0.5, opacity: 0 }}
+   806→                animate={{ scale: 1, opacity: 1 }}
+   807→                exit={{ scale: 0.5, opacity: 0 }}
+   808→                transition={{ type: 'spring', stiffness: 200, damping: 15 }}
+   809→                className={`glass-strong rounded-2xl p-8 max-w-sm w-full text-center border ${
+   810→                  tradeResult.win ? 'border-emerald-500/30' : 'border-red-500/30'
+   811→                }`}
+   812→                onClick={(e) => e.stopPropagation()}
+   813→              >
+   814→                <motion.div
+   815→                  initial={{ scale: 0, rotate: -180 }}
+   816→                  animate={{ scale: 1, rotate: 0 }}
+   817→                  transition={{ type: 'spring', stiffness: 200, delay: 0.1 }}
+   818→                  className={`w-24 h-24 rounded-full mx-auto mb-4 flex items-center justify-center ${
+   819→                    tradeResult.win ? 'bg-emerald-500/20' : 'bg-red-500/20'
+   820→                  }`}
+   821→                >
+   822→                  {tradeResult.win ? (
+   823→                    <Trophy className="w-12 h-12 text-emerald-400" />
+   824→                  ) : (
+   825→                    <XCircle className="w-12 h-12 text-red-400" />
+   826→                  )}
+   827→                </motion.div>
+   828→
+   829→                <motion.h3
+   830→                  initial={{ opacity: 0, y: 10 }}
+   831→                  animate={{ opacity: 1, y: 0 }}
+   832→                  transition={{ delay: 0.2 }}
+   833→                  className={`text-2xl font-bold mb-2 ${
+   834→                    tradeResult.win ? 'text-emerald-400' : 'text-red-400'
+   835→                  }`}
+   836→                >
+   837→                  {tradeResult.win ? 'You Won!' : 'You Lost'}
+   838→                </motion.h3>
+   839→
+   840→                <motion.p
+   841→                  initial={{ opacity: 0, y: 10 }}
+   842→                  animate={{ opacity: 1, y: 0 }}
+   843→                  transition={{ delay: 0.3 }}
+   844→                  className="text-sm text-muted-foreground mb-4"
+   845→                >
+   846→                  {tradeResult.message}
+   847→                </motion.p>
+   848→
+   849→                {tradeResult.win ? (
+   850→                  <motion.div
+   851→                    initial={{ opacity: 0, y: 10 }}
+   852→                    animate={{ opacity: 1, y: 0 }}
+   853→                    transition={{ delay: 0.4 }}
+   854→                    className="glass rounded-lg p-3 text-sm space-y-1.5 mb-6"
+   855→                  >
+   856→                    <div className="flex justify-between">
+   857→                      <span className="text-muted-foreground">Investment</span>
+   858→                      <span className="font-medium">{formatNaira(amountNum)}</span>
+   859→                    </div>
+   860→                    <div className="flex justify-between">
+   861→                      <span className="text-muted-foreground">Multiplier</span>
+   862→                      <span className="font-medium text-gold">{(tradeResult.multiplier ?? 1).toFixed(2)}x</span>
+   863→                    </div>
+   864→                    <div className="flex justify-between">
+   865→                      <span className="text-muted-foreground">Total Return</span>
+   866→                      <span className="font-medium text-emerald-400">{formatNaira(tradeResult.totalReturn)}</span>
+   867→                    </div>
+   868→                    <div className="border-t border-white/10 pt-1.5 flex justify-between">
+   869→                      <span className="text-muted-foreground font-medium">Profit</span>
+   870→                      <span className="font-bold text-emerald-400">+{formatNaira(tradeResult.profit)}</span>
+   871→                    </div>
+   872→                  </motion.div>
+   873→                ) : (
+   874→                  <motion.div
+   875→                    initial={{ opacity: 0, y: 10 }}
+   876→                    animate={{ opacity: 1, y: 0 }}
+   877→                    transition={{ delay: 0.4 }}
+   878→                    className={`text-4xl font-bold font-mono mb-6 text-red-400`}
+   879→                  >
+   880→                    -{formatNaira(amountNum)}
+   881→                  </motion.div>
+   882→                )}
+   883→
+   884→                <Button
+   885→                  onClick={() => { setTradeResult(null); }}
+   886→                  className={`w-full font-semibold h-11 ${
+   887→                    tradeResult.win
+   888→                      ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 hover:bg-emerald-500/30'
+   889→                      : 'bg-red-500/20 text-red-400 border border-red-500/30 hover:bg-red-500/30'
+   890→                  }`}
+   891→                >
+   892→                  Continue Trading
+   893→                </Button>
+   894→              </motion.div>
+   895→            </motion.div>
+   896→          )}
+   897→        </AnimatePresence>
+   898→
+   899→        {/* Trade History */}
+   900→        <motion.div
+   901→          initial={{ opacity: 0, y: 20 }}
+   902→          animate={{ opacity: 1, y: 0 }}
+   903→          transition={{ delay: 0.2 }}
+   904→          className="glass rounded-xl p-4"
+   905→        >
+   906→          <div className="flex items-center justify-between mb-3">
+   907→            <div className="flex items-center gap-2">
+   908→              <History className="w-4 h-4 text-muted-foreground" />
+   909→              <h2 className="font-semibold text-sm">Trade History</h2>
+   910→            </div>
+   911→            <div className="flex gap-1">
+   912→              {HISTORY_FILTERS.map((f) => (
+   913→                <button
+   914→                  key={f.value}
+   915→                  onClick={() => setHistoryFilter(f.value)}
+   916→                  className={`px-3 py-1 rounded-lg text-xs font-medium transition-colors ${
+   917→                    historyFilter === f.value
+   918→                      ? 'glass-strong text-gold'
+   919→                      : 'text-muted-foreground hover:text-foreground hover:bg-white/5'
+   920→                  }`}
+   921→                >
+   922→                  {f.label}
+   923→                </button>
+   924→              ))}
+   925→            </div>
+   926→          </div>
+   927→
+   928→          {historyLoading ? (
+   929→            <div className="space-y-2">
+   930→              {Array.from({ length: 3 }).map((_, i) => (
+   931→                <Skeleton key={i} className="h-12 rounded-lg bg-white/5" />
+   932→              ))}
+   933→            </div>
+   934→          ) : filteredHistory.length === 0 ? (
+   935→            <div className="text-center py-8">
+   936→              <Filter className="w-8 h-8 text-muted-foreground/40 mx-auto mb-2" />
+   937→              <p className="text-sm text-muted-foreground">No trades found</p>
+   938→            </div>
+   939→          ) : (
+   940→            <div className="max-h-80 overflow-y-auto scrollbar-thin -mx-1">
+   941→              <Table>
+   942→                <TableHeader>
+   943→                  <TableRow className="border-white/5 hover:bg-transparent">
+   944→                    <TableHead className="text-[10px] text-muted-foreground">Date</TableHead>
+   945→                    <TableHead className="text-[10px] text-muted-foreground">Side</TableHead>
+   946→                    <TableHead className="text-[10px] text-muted-foreground text-right">Amount</TableHead>
+   947→                    <TableHead className="text-[10px] text-muted-foreground text-right">Multi</TableHead>
+   948→                    <TableHead className="text-[10px] text-muted-foreground text-right">Time</TableHead>
+   949→                    <TableHead className="text-[10px] text-muted-foreground text-right">Result</TableHead>
+   950→                    <TableHead className="text-[10px] text-muted-foreground text-right">P/L</TableHead>
+   951→                  </TableRow>
+   952→                </TableHeader>
+   953→                <TableBody>
+   954→                  {filteredHistory.map((trade) => (
+   955→                    <TableRow key={trade.id} className="border-white/5">
+   956→                      <TableCell className="text-xs text-muted-foreground py-2">
+   957→                        {new Date(trade.createdAt).toLocaleDateString('en-US', {
+   958→                          month: 'short',
+   959→                          day: 'numeric',
+   960→                        })}
+   961→                      </TableCell>
+   962→                      <TableCell className="py-2">
+   963→                        <Badge
+   964→                          className={`text-[10px] gap-0.5 ${
+   965→                            trade.prediction === 'UP'
+   966→                              ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20'
+   967→                              : 'bg-red-500/10 text-red-400 border-red-500/20'
+   968→                          }`}
+   969→                        >
+   970→                          {trade.prediction === 'UP' ? (
+   971→                            <ArrowUpCircle className="w-3 h-3" />
+   972→                          ) : (
+   973→                            <ArrowDownCircle className="w-3 h-3" />
+   974→                          )}
+   975→                          {trade.prediction}
+   976→                        </Badge>
+   977→                      </TableCell>
+   978→                      <TableCell className="text-xs font-medium text-right py-2">
+   979→                        {formatNaira(trade.amount)}
+   980→                      </TableCell>
+   981→                      <TableCell className="text-xs text-muted-foreground text-right py-2">
+   982→                        {(trade.multiplier ?? trade.payout_multiplier ?? 1).toFixed(2)}x
+   983→                      </TableCell>
+   984→                      <TableCell className="text-xs text-muted-foreground text-right py-2">
+   985→                        {DURATION_OPTIONS.find((d) => d.value === trade.duration)?.label || `${trade.duration}s`}
+   986→                      </TableCell>
+   987→                      <TableCell className="text-right py-2">
+   988→                        <Badge
+   989→                          className={`text-[10px] ${
+   990→                            trade.result === 'win'
+   991→                              ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20'
+   992→                              : 'bg-red-500/10 text-red-400 border-red-500/20'
+   993→                          }`}
+   994→                        >
+   995→                          {trade.result === 'win' ? (
+   996→                            <CheckCircle2 className="w-3 h-3 mr-0.5" />
+   997→                          ) : (
+   998→                            <XCircle className="w-3 h-3 mr-0.5" />
+   999→                          )}
+  1000→                          {trade.result.toUpperCase()}
+  1001→                        </Badge>
+  1002→                      </TableCell>
+  1003→                      <TableCell
+  1004→                        className={`text-xs font-bold text-right py-2 ${
+  1005→                          trade.profit >= 0 ? 'text-emerald-400' : 'text-red-400'
+  1006→                        }`}
+  1007→                      >
+  1008→                        {trade.profit >= 0 ? '+' : ''}{formatNaira(trade.profit)}
+  1009→                      </TableCell>
+  1010→                    </TableRow>
+  1011→                  ))}
+  1012→                </TableBody>
+  1013→              </Table>
+  1014→            </div>
+  1015→          )}
+  1016→        </motion.div>
+  1017→      </main>
+  1018→    </div>
+  1019→  );
+  1020→}
+  1021→
