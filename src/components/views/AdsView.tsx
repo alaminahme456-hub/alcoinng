@@ -9,7 +9,7 @@ import { Badge } from '@/components/ui/badge';
 import { toast } from 'sonner';
 import {
   ArrowLeft, Tv, Clock, Coins, Play, CheckCircle2,
-  Loader2, AlertCircle, TvIcon, Eye,
+  Loader2, AlertCircle, TvIcon, Eye, X,
 } from 'lucide-react';
 
 function formatNaira(amount: number) {
@@ -26,7 +26,7 @@ interface AdItem {
   active: boolean;
 }
 
-type WatchingState = null | { adId: string; remaining: number; total: number; isAdsense?: boolean };
+type WatchingState = null | { adId: string; remaining: number; total: number; isAdsense?: boolean; canClose?: boolean };
 
 const THUMBNAIL_COLORS = [
   'from-gold/30 to-amber-700/30',
@@ -51,19 +51,17 @@ export default function AdsView() {
   // AdSense ad state
   const [adsenseClaimed, setAdsenseClaimed] = useState(false);
   const [adsenseLoading, setAdsenseLoading] = useState(false);
-  const adsensePushed = useRef(false);
+  const adContainerRef = useRef<HTMLDivElement>(null);
 
-  // Push AdSense ad when overlay is showing
+  // Inject ad script when overlay opens
   useEffect(() => {
-    if (watching?.isAdsense && !adsensePushed.current) {
-      adsensePushed.current = true;
-      try {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        ((window as any).adsbygoogle = (window as any).adsbygoogle || []).push({});
-      } catch {}
-    }
-    if (!watching?.isAdsense) {
-      adsensePushed.current = false;
+    if (watching?.isAdsense && adContainerRef.current) {
+      // Clear previous content
+      adContainerRef.current.innerHTML = '';
+      const script = document.createElement('script');
+      script.src = 'https://pl30773804.effectivecpmnetwork.com/d6/6a/99/d66a9913f6a076a2556d9a9d1e30a4b8.js';
+      script.async = true;
+      adContainerRef.current.appendChild(script);
     }
   }, [watching?.isAdsense]);
 
@@ -128,24 +126,35 @@ export default function AdsView() {
   };
 
   const startAdsenseWatch = () => {
-    const duration = 10;
-    setWatching({ adId: 'adsense-vid1', remaining: duration, total: duration, isAdsense: true });
+    const duration = 5;
+    setWatching({ adId: 'adsense-vid1', remaining: duration, total: duration, isAdsense: true, canClose: false });
     setWatchingTitle('Sponsored Ad');
     setWatchingReward(200);
 
     timerRef.current = setInterval(() => {
       setWatching((prev) => {
-        if (!prev) return null;
+        if (!prev || !prev.isAdsense) return prev;
         const next = prev.remaining - 1;
         if (next <= 0) {
           if (timerRef.current) clearInterval(timerRef.current);
           timerRef.current = null;
-          claimAdsenseReward();
-          return null;
+          // Show close button — user must click to claim
+          return { ...prev, remaining: 0, canClose: true };
         }
         return { ...prev, remaining: next };
       });
     }, 1000);
+  };
+
+  const closeAdsenseAd = async () => {
+    if (timerRef.current) { clearInterval(timerRef.current); timerRef.current = null; }
+    setWatching(null);
+    await claimAdsenseReward();
+  };
+
+  const cancelAdsenseAd = () => {
+    if (timerRef.current) { clearInterval(timerRef.current); timerRef.current = null; }
+    setWatching(null);
   };
 
   const claimAdsenseReward = async () => {
@@ -256,7 +265,7 @@ export default function AdsView() {
               )}
               <div className="absolute bottom-2 left-2 px-2 py-0.5 rounded-md bg-black/60 backdrop-blur-sm text-[10px] text-white flex items-center gap-1">
                 <Clock className="w-3 h-3" />
-                10s
+                5s
               </div>
             </div>
             <div className="flex-1 p-4 flex flex-col justify-between min-w-0">
@@ -302,63 +311,85 @@ export default function AdsView() {
           </div>
         </motion.div>
 
-        {/* AdSense ad container (visible during watching overlay) */}
+        {/* Sponsored Ad Overlay */}
         <AnimatePresence>
           {watching && watching.isAdsense && (
             <motion.div
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
-              className="fixed inset-0 z-50 bg-black/90 backdrop-blur-sm flex flex-col items-center justify-center p-4"
+              className="fixed inset-0 z-50 bg-[#09090b] flex flex-col"
             >
-              <motion.div
-                initial={{ scale: 0.9, opacity: 0 }}
-                animate={{ scale: 1, opacity: 1 }}
-                exit={{ scale: 0.9, opacity: 0 }}
-                className="glass-strong rounded-2xl p-5 max-w-sm w-full"
-              >
-                <div className="flex items-center justify-between mb-3">
+              {/* Top bar */}
+              <div className="glass-strong px-4 py-3 flex items-center justify-between shrink-0">
+                <div className="flex items-center gap-2">
+                  <Eye className="w-4 h-4 text-gold" />
+                  <span className="font-semibold text-sm">Sponsored Ad</span>
+                  <Badge variant="secondary" className="bg-gold/10 text-gold border-gold/20 text-[9px] px-1.5 py-0">AD</Badge>
+                </div>
+                {watching.canClose ? (
+                  <motion.button
+                    initial={{ opacity: 0, scale: 0.8 }}
+                    animate={{ opacity: 1, scale: 1 }}
+                    onClick={closeAdsenseAd}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-500/20 border border-emerald-500/30 text-emerald-400 text-xs font-semibold hover:bg-emerald-500/30 transition-colors"
+                  >
+                    <X className="w-4 h-4" />
+                    Close & Claim ₦200
+                  </motion.button>
+                ) : (
                   <div className="flex items-center gap-2">
-                    <Eye className="w-4 h-4 text-gold" />
-                    <span className="font-semibold text-sm">Sponsored Ad</span>
-                    <Badge variant="secondary" className="bg-gold/10 text-gold border-gold/20 text-[9px] px-1.5 py-0">AD</Badge>
-                  </div>
-                  <div className="flex items-center gap-1.5">
                     <div className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
                     <span className="text-[10px] text-emerald-400 font-medium">LIVE</span>
                   </div>
-                </div>
+                )}
+              </div>
 
-                {/* AdSense Ad Slot */}
-                <div className="rounded-xl overflow-hidden bg-white/5 border border-white/10 mb-3 min-h-[250px] flex items-center justify-center">
-                  <ins
-                    className="adsbygoogle"
-                    style={{ display: 'block' }}
-                    data-ad-client="ca-pub-9016878264107871"
-                    data-ad-slot="6973333921"
-                    data-ad-format="auto"
-                    data-full-width-responsive="true"
-                  />
-                </div>
+              {/* Ad content area */}
+              <div className="flex-1 flex flex-col items-center justify-center p-4">
+                {/* Ad script container */}
+                <div
+                  ref={adContainerRef}
+                  className="w-full max-w-lg min-h-[300px] rounded-xl overflow-hidden"
+                />
 
-                {/* Timer + Progress */}
-                <div className="text-center mb-2">
-                  <p className="text-3xl font-bold gradient-gold-text font-mono">
-                    {formatTime(watching.remaining)}
-                  </p>
-                  <p className="text-xs text-muted-foreground mt-1">
-                    Reward: <span className="text-gold font-medium">₦200</span>
-                  </p>
-                </div>
+                {/* Waiting message when can't close yet */}
+                {!watching.canClose && (
+                  <div className="mt-6 text-center">
+                    <p className="text-sm text-muted-foreground mb-2">
+                      Wait for the close button to appear
+                    </p>
+                    <div className="flex items-center justify-center gap-3">
+                      <div className="w-40 h-2 rounded-full bg-white/10 overflow-hidden">
+                        <motion.div
+                          className="h-full gradient-gold rounded-full"
+                          animate={{ width: `${((watching.total - watching.remaining) / watching.total) * 100}%` }}
+                          transition={{ duration: 0.3 }}
+                        />
+                      </div>
+                      <span className="text-lg font-bold gradient-gold-text font-mono min-w-[40px]">
+                        {watching.remaining}s
+                      </span>
+                    </div>
+                  </div>
+                )}
 
-                <div className="w-full h-2 rounded-full bg-white/10 overflow-hidden">
+                {/* Claim ready message */}
+                {watching.canClose && (
                   <motion.div
-                    className="h-full gradient-gold rounded-full"
-                    animate={{ width: `${((watching.total - watching.remaining) / watching.total) * 100}%` }}
-                    transition={{ duration: 0.3 }}
-                  />
-                </div>
-              </motion.div>
+                    initial={{ opacity: 0, y: 10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    className="mt-6 text-center"
+                  >
+                    <p className="text-sm font-medium text-emerald-400">
+                      Tap the close button to claim your reward!
+                    </p>
+                    <p className="text-xs text-muted-foreground mt-1">
+                      Reward: <span className="text-gold font-bold">₦200</span>
+                    </p>
+                  </motion.div>
+                )}
+              </div>
             </motion.div>
           )}
         </AnimatePresence>
