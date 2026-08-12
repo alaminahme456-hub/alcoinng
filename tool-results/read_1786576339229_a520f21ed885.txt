@@ -1,0 +1,551 @@
+   600→   666→                whileTap={{ scale: 0.97 }}
+   601→   667→                onClick={() => setPrediction(prediction === 'UP' ? null : 'UP')}
+   602→   668→                className={`rounded-lg p-2.5 flex items-center gap-2 transition-all border-2 ${
+   603→   669→                  prediction === 'UP'
+   604→   670→                    ? 'bg-emerald-500/15 border-emerald-500/50'
+   605→   671→                    : 'glass border-transparent hover:border-emerald-500/20'
+   606→   672→                }`}
+   607→   673→              >
+   608→   674→                <ArrowUpCircle className={`w-5 h-5 ${prediction === 'UP' ? 'text-emerald-400' : 'text-muted-foreground'}`} />
+   609→   675→                <span className={`text-xs font-bold ${prediction === 'UP' ? 'text-emerald-400' : 'text-muted-foreground'}`}>
+   610→   676→                  Buy
+   611→   677→                </span>
+   612→   678→                <span className={`text-[10px] ${prediction === 'UP' ? 'text-emerald-400/70' : 'text-muted-foreground/60'}`}>
+   613→   679→                  UP
+   614→   680→                </span>
+   615→   681→              </motion.button>
+   616→   682→
+   617→   683→              <motion.button
+   618→   684→                whileTap={{ scale: 0.97 }}
+   619→   685→                onClick={() => setPrediction(prediction === 'DOWN' ? null : 'DOWN')}
+   620→   686→                className={`rounded-lg p-2.5 flex items-center gap-2 transition-all border-2 ${
+   621→   687→                  prediction === 'DOWN'
+   622→   688→                    ? 'bg-red-500/15 border-red-500/50'
+   623→   689→                    : 'glass border-transparent hover:border-red-500/20'
+   624→   690→                }`}
+   625→   691→              >
+   626→   692→                <ArrowDownCircle className={`w-5 h-5 ${prediction === 'DOWN' ? 'text-red-400' : 'text-muted-foreground'}`} />
+   627→   693→                <span className={`text-xs font-bold ${prediction === 'DOWN' ? 'text-red-400' : 'text-muted-foreground'}`}>
+   628→   694→                  Sell
+   629→   695→                </span>
+   630→   696→                <span className={`text-[10px] ${prediction === 'DOWN' ? 'text-red-400/70' : 'text-muted-foreground/60'}`}>
+   631→   697→                  DOWN
+   632→   698→                </span>
+   633→   699→              </motion.button>
+   634→   700→            </div>
+   635→   701→          </div>
+   636→   702→
+   637→   703→          {/* 3. Investment Amount */}
+   638→   704→          <div className="space-y-2">
+   639→   705→            <p className="text-xs text-muted-foreground">Investment</p>
+   640→   706→            <div className="relative">
+   641→   707→              <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-muted-foreground font-medium">
+   642→   708→                \u20a6
+   643→   709→              </span>
+   644→   710→              <Input
+   645→   711→                type="number"
+   646→   712→                inputMode="decimal"
+   647→   713→                placeholder="0"
+   648→   714→                value={tradeAmount}
+   649→   715→                onChange={(e) => setTradeAmount(e.target.value)}
+   650→   716→                className="pl-8 pr-16 bg-white/5 border-white/10 focus:border-gold h-12 text-lg font-semibold"
+   651→   717→                min="0"
+   652→   718→                max={availableBalance}
+   653→   719→              />
+   654→   720→              <button
+   655→   721→                type="button"
+   656→   722→                onClick={() => setTradeAmount(availableBalance.toString())}
+   657→   723→                className="absolute right-2 top-1/2 -translate-y-1/2 px-2 py-1 rounded text-[10px] font-medium text-gold bg-gold/10 hover:bg-gold/20 transition-colors"
+   658→   724→              >
+   659→   725→                MAX
+   660→   726→              </button>
+   661→   727→            </div>
+   662→   728→            {amountNum > availableBalance && amountNum > 0 && (
+   663→   729→              <p className="text-[11px] text-red-400">
+   664→   730→                Amount exceeds your {WALLET_CONFIG[selectedWallet].label} balance of {formatNaira(availableBalance)}
+   665→   731→              </p>
+   666→   732→            )}
+   667→   733→          </div>
+   668→   734→
+   669→   735→          {/* 4. Trade Duration */}
+   670→   736→          <div className="space-y-2">
+   671→   737→            <p className="text-xs text-muted-foreground">Trade Duration</p>
+   672→   738→            <Select
+   673→   739→              value={duration.toString()}
+   674→   740→              onValueChange={(v) => setDuration(parseInt(v))}
+   675→   741→            >
+   676→   742→              <SelectTrigger className="w-full bg-white/5 border-white/10 focus:border-gold h-11">
+   677→   743→                <Clock className="w-4 h-4 text-muted-foreground mr-2" />
+   678→   744→                <SelectValue />
+   679→   745→              </SelectTrigger>
+   680→   746→              <SelectContent className="glass-strong border-white/10">
+   681→   747→                {DURATION_OPTIONS.map((opt) => (
+   682→   748→                  <SelectItem key={opt.value} value={opt.value.toString()}>
+   683→   749→                    {opt.label}
+   684→   750→                  </SelectItem>
+   685→   751→                ))}
+   686→   752→              </SelectContent>
+   687→   753→            </Select>
+   688→   754→          </div>
+   689→   755→
+   690→   756→          {/* Place Trade Button */}
+   691→   757→          <Button
+   692→   758→            onClick={handleTrade}
+   693→   759→            disabled={!prediction || amountNum <= 0 || amountNum > availableBalance || trading}
+   694→   760→            className="w-full gradient-gold text-gold-foreground font-bold h-13 text-base disabled:opacity-40 disabled:cursor-not-allowed"
+   695→   761→          >
+   696→   762→            {!prediction || amountNum <= 0 ? (
+   697→   763→              'Select Prediction & Amount'
+   698→   764→            ) : amountNum > availableBalance ? (
+   699→   765→              'Insufficient Balance'
+   700→   766→            ) : trading ? (
+   701→   767→              <span className="flex items-center gap-2">
+   702→   768→                <Loader2 className="w-5 h-5 animate-spin" />
+   703→   769→                Trading...
+   704→   770→              </span>
+   705→   771→            ) : (
+   706→   772→              `Place Trade \u2014 ${formatNaira(amountNum)}`
+   707→   773→            )}
+   708→   774→          </Button>
+   709→   775→        </motion.div>
+   710→   776→
+   711→   777→        {/* ═══════ PHASE 1: Trade Successfully Placed ═══════ */}
+   712→   778→        <AnimatePresence>
+   713→   779→          {tradePhase === 'confirmed' && (
+   714→   780→            <motion.div
+   715→   781→              initial={{ opacity: 0 }}
+   716→   782→              animate={{ opacity: 1 }}
+   717→   783→              exit={{ opacity: 0 }}
+   718→   784→              className="fixed inset-0 z-50 bg-black/85 backdrop-blur-md flex items-center justify-center p-4"
+   719→   785→            >
+   720→   786→              <motion.div
+   721→   787→                initial={{ scale: 0.8, opacity: 0 }}
+   722→   788→                animate={{ scale: 1, opacity: 1 }}
+   723→   789→                exit={{ scale: 0.8, opacity: 0 }}
+   724→   790→                className="glass-strong rounded-2xl p-8 max-w-sm w-full text-center"
+   725→   791→              >
+   726→   792→                <motion.div
+   727→   793→                  initial={{ scale: 0 }}
+   728→   794→                  animate={{ scale: 1 }}
+   729→   795→                  transition={{ type: 'spring', stiffness: 200, delay: 0.1 }}
+   730→   796→                  className="w-20 h-20 rounded-full bg-emerald-500/15 flex items-center justify-center mx-auto mb-5"
+   731→   797→                >
+   732→   798→                  <CheckCircle className="w-10 h-10 text-emerald-400" />
+   733→   799→                </motion.div>
+   734→   800→
+   735→   801→                <motion.h3
+   736→   802→                  initial={{ opacity: 0, y: 10 }}
+   737→   803→                  animate={{ opacity: 1, y: 0 }}
+   738→   804→                  transition={{ delay: 0.2 }}
+   739→   805→                  className="text-xl font-bold mb-2"
+   740→   806→                >
+   741→   807→                  Trade Successfully Placed
+   742→   808→                </motion.h3>
+   743→   809→                <motion.p
+   744→   810→                  initial={{ opacity: 0, y: 10 }}
+   745→   811→                  animate={{ opacity: 1, y: 0 }}
+   746→   812→                  transition={{ delay: 0.3 }}
+   747→   813→                  className="text-sm text-muted-foreground mb-5"
+   748→   814→                >
+   749→   815→                  Your prediction has been recorded.
+   750→   816→                </motion.p>
+   751→   817→
+   752→   818→                <motion.div
+   753→   819→                  initial={{ opacity: 0 }}
+   754→   820→                  animate={{ opacity: 1 }}
+   755→   821→                  transition={{ delay: 0.5 }}
+   756→   822→                  className="flex items-center justify-center gap-2 text-gold text-sm font-medium"
+   757→   823→                >
+   758→   824→                  <Eye className="w-4 h-4" />
+   759→   825→                  <span>Opening Market Monitor...</span>
+   760→   826→                  <Loader2 className="w-4 h-4 animate-spin" />
+   761→   827→                </motion.div>
+   762→   828→              </motion.div>
+   763→   829→            </motion.div>
+   764→   830→          )}
+   765→   831→        </AnimatePresence>
+   766→   832→
+   767→   833→        {/* ═══════ PHASE 2: Market Monitor ═══════ */}
+   768→   834→        <AnimatePresence>
+   769→   835→          {tradePhase === 'monitoring' && monitorInfoRef.current && (
+   770→   836→            <motion.div
+   771→   837→              initial={{ opacity: 0 }}
+   772→   838→              animate={{ opacity: 1 }}
+   773→   839→              exit={{ opacity: 0 }}
+   774→   840→              className="fixed inset-0 z-50 bg-[#09090b] flex flex-col"
+   775→   841→            >
+   776→   842→              {/* Monitor Header */}
+   777→   843→              <div className="glass-strong px-4 py-3 flex items-center justify-between shrink-0">
+   778→   844→                <div className="flex items-center gap-2">
+   779→   845→                  <Eye className="w-4 h-4 text-gold" />
+   780→   846→                  <span className="font-semibold text-sm">TRADE IN PROGRESS</span>
+   781→   847→                </div>
+   782→   848→                <div className="flex items-center gap-1.5">
+   783→   849→                  <div className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+   784→   850→                  <span className="text-[10px] text-emerald-400 font-medium">LIVE</span>
+   785→   851→                </div>
+   786→   852→              </div>
+   787→   853→
+   788→   854→              {/* Monitor Body */}
+   789→   855→              <div className="flex-1 overflow-y-auto px-4 py-4 max-w-lg mx-auto w-full space-y-4">
+   790→   856→                {/* Countdown */}
+   791→   857→                <div className="text-center">
+   792→   858→                  <p className="text-xs text-muted-foreground mb-1 tracking-wider uppercase">Time Remaining</p>
+   793→   859→                  <p className={`text-5xl sm:text-6xl font-bold font-mono ${
+   794→   860→                    monitorInfoRef.current.prediction === 'UP' ? 'text-emerald-400' : 'text-red-400'
+   795→   861→                  }`}>
+   796→   862→                    {formatCountdown(Math.max(0, countdownDisplayRef.current))}
+   797→   863→                  </p>
+   798→   864→                </div>
+   799→   865→
+   800→   866→                {/* Progress Bar */}
+   801→   867→                <div className="w-full h-2 rounded-full bg-white/10 overflow-hidden">
+   802→   868→                  <div
+   803→   869→                    className={`h-full rounded-full transition-all duration-1000 ${
+   804→   870→                      monitorInfoRef.current.prediction === 'UP' ? 'bg-emerald-500' : 'bg-red-500'
+   805→   871→                    }`}
+   806→   872→                    style={{ width: `${Math.max(0, ((monitorInfoRef.current.duration - Math.max(0, countdownDisplayRef.current)) / monitorInfoRef.current.duration) * 100)}%` }}
+   807→   873→                  />
+   808→   874→                </div>
+   809→   875→
+   810→   876→                {/* Live Chart */}
+   811→   877→                <div className="glass rounded-xl p-3">
+   812→   878→                  <div className="flex items-center justify-between mb-2">
+   813→   879→                    <span className="text-xs text-muted-foreground">Live Chart</span>
+   814→   880→                    <span className={`text-xs font-medium flex items-center gap-1 ${
+   815→   881→                      currentPrice != null && currentPrice > monitorInfoRef.current.startPrice ? 'text-emerald-400'
+   816→   882→                        : currentPrice != null && currentPrice < monitorInfoRef.current.startPrice ? 'text-red-400' : 'text-gold'
+   817→   883→                    }`}>
+   818→   884→                      {currentPrice != null && currentPrice > monitorInfoRef.current.startPrice ? <ArrowUp className="w-3 h-3" /> : null}
+   819→   885→                      {currentPrice != null && currentPrice < monitorInfoRef.current.startPrice ? <ArrowDown className="w-3 h-3" /> : null}
+   820→   886→                      {currentPrice != null && currentPrice > monitorInfoRef.current.startPrice ? 'Up'
+   821→   887→                        : currentPrice != null && currentPrice < monitorInfoRef.current.startPrice ? 'Down' : 'Neutral'}
+   822→   888→                    </span>
+   823→   889→                  </div>
+   824→   890→                  <div className="h-36 sm:h-44">
+   825→   891→                    <ResponsiveContainer width="100%" height="100%">
+   826→   892→                      <AreaChart data={priceData} margin={{ top: 5, right: 5, left: -20, bottom: 0 }}>
+   827→   893→                        <defs>
+   828→   894→                          <linearGradient id="monGradUp" x1="0" y1="0" x2="0" y2="1">
+   829→   895→                            <stop offset="0%" stopColor="#34d399" stopOpacity={0.3} />
+   830→   896→                            <stop offset="100%" stopColor="#34d399" stopOpacity={0} />
+   831→   897→                          </linearGradient>
+   832→   898→                          <linearGradient id="monGradDn" x1="0" y1="0" x2="0" y2="1">
+   833→   899→                            <stop offset="0%" stopColor="#f87171" stopOpacity={0.3} />
+   834→   900→                            <stop offset="100%" stopColor="#f87171" stopOpacity={0} />
+   835→   901→                          </linearGradient>
+   836→   902→                        </defs>
+   837→   903→                        <CartesianGrid strokeDasharray="3 3" stroke="rgba(212,175,55,0.08)" vertical={false} />
+   838→   904→                        <XAxis dataKey="time" tick={{ fontSize: 9, fill: '#8888a0' }} axisLine={{ stroke: 'rgba(255,255,255,0.06)' }} tickLine={false} interval="preserveStartEnd" />
+   839→   905→                        <YAxis domain={['auto','auto']} tick={{ fontSize: 9, fill: '#8888a0' }} axisLine={{ stroke: 'rgba(255,255,255,0.06)' }} tickLine={false} tickFormatter={(v: any) => v != null ? Number(v).toFixed(0) : ''} />
+   840→   906→                        <Area
+   841→   907→                          type="monotone" dataKey="price"
+   842→   908→                          stroke={currentPrice != null && currentPrice >= monitorInfoRef.current.startPrice ? '#34d399' : '#f87171'}
+   843→   909→                          strokeWidth={2}
+   844→   910→                          fill={currentPrice != null && currentPrice >= monitorInfoRef.current.startPrice ? 'url(#monGradUp)' : 'url(#monGradDn)'}
+   845→   911→                          dot={false} isAnimationActive={false}
+   846→   912→                        />
+   847→   913→                      </AreaChart>
+   848→   914→                    </ResponsiveContainer>
+   849→   915→                  </div>
+   850→   916→                </div>
+   851→   917→
+   852→   918→                {/* Trade Details */}
+   853→   919→                <div className="glass rounded-xl p-4 space-y-3">
+   854→   920→                  <div className="flex justify-between items-center">
+   855→   921→                    <span className="text-xs text-muted-foreground">Prediction</span>
+   856→   922→                    <span className={`text-sm font-bold flex items-center gap-1.5 ${
+   857→   923→                      monitorInfoRef.current.prediction === 'UP' ? 'text-emerald-400' : 'text-red-400'
+   858→   924→                    }`}>
+   859→   925→                      {monitorInfoRef.current.prediction === 'UP' ? <ArrowUpCircle className="w-4 h-4" /> : <ArrowDownCircle className="w-4 h-4" />}
+   860→   926→                      {monitorInfoRef.current.prediction === 'UP' ? 'BUY' : 'SELL'}
+   861→   927→                    </span>
+   862→   928→                  </div>
+   863→   929→                  <div className="flex justify-between items-center">
+   864→   930→                    <span className="text-xs text-muted-foreground">Starting Value</span>
+   865→   931→                    <span className="text-sm font-mono font-medium">{formatNaira(monitorInfoRef.current.startPrice)}</span>
+   866→   932→                  </div>
+   867→   933→                  <div className="flex justify-between items-center">
+   868→   934→                    <span className="text-xs text-muted-foreground">Current Value</span>
+   869→   935→                    <span className={`text-sm font-mono font-bold ${
+   870→   936→                      currentPrice != null && currentPrice > monitorInfoRef.current.startPrice ? 'text-emerald-400'
+   871→   937→                        : currentPrice != null && currentPrice < monitorInfoRef.current.startPrice ? 'text-red-400' : 'text-foreground'
+   872→   938→                    }`}>
+   873→   939→                      {currentPrice != null ? formatNaira(currentPrice) : '---'}
+   874→   940→                    </span>
+   875→   941→                  </div>
+   876→   942→                  <div className="h-px bg-white/5" />
+   877→   943→                  <div className="flex justify-between items-center">
+   878→   944→                    <span className="text-xs text-muted-foreground">Status</span>
+   879→   945→                    <span className="text-xs font-bold px-2.5 py-1 rounded-full bg-amber-500/15 text-amber-400 border border-amber-500/20">ACTIVE</span>
+   880→   946→                  </div>
+   881→   947→                  <div className="flex justify-between items-center">
+   882→   948→                    <span className="text-xs text-muted-foreground">Trade Start</span>
+   883→   949→                    <span className="text-xs font-mono">{new Date(monitorInfoRef.current.startTime).toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' })}</span>
+   884→   950→                  </div>
+   885→   951→                  <div className="flex justify-between items-center">
+   886→   952→                    <span className="text-xs text-muted-foreground">Trade End</span>
+   887→   953→                    <span className="text-xs font-mono">{new Date(monitorInfoRef.current.endTime).toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' })}</span>
+   888→   954→                  </div>
+   889→   955→                  <div className="flex justify-between items-center">
+   890→   956→                    <span className="text-xs text-muted-foreground">Investment</span>
+   891→   957→                    <span className="text-sm font-medium">{formatNaira(monitorInfoRef.current.amount)}</span>
+   892→   958→                  </div>
+   893→   959→                </div>
+   894→   960→
+   895→   961→                {/* Trade ID */}
+   896→   962→                <p className="text-center text-[10px] text-muted-foreground tracking-wider">Trade #{monitorInfoRef.current.tradeId}</p>
+   897→   963→
+   898→   964→                {/* Back to Dashboard */}
+   899→   965→                <button
+   900→   966→                  onClick={() => { stopCountdown(); pendingTradeResult.current = null; if (resultAutoReturnRef.current) { clearTimeout(resultAutoReturnRef.current); resultAutoReturnRef.current = null; } setTrading(false); tradingRef.current = false; setTradePhase('idle'); monitorInfoRef.current = null; setView('dashboard'); }}
+   901→   967→                  className="w-full h-11 rounded-xl bg-white/5 border border-white/10 text-sm font-medium flex items-center justify-center gap-2 hover:bg-white/10 transition-colors"
+   902→   968→                >
+   903→   969→                  <Home className="w-4 h-4" />
+   904→   970→                  Back to Dashboard
+   905→   971→                </button>
+   906→   972→              </div>
+   907→   973→            </motion.div>
+   908→   974→          )}
+   909→   975→        </AnimatePresence>
+   910→   976→
+   911→   977→        {/* ═══════ PHASE 4: Trade Result ═══════ */}
+   912→   978→        <AnimatePresence>
+   913→   979→          {tradePhase === 'result' && tradeResult && (
+   914→   980→            <motion.div
+   915→   981→              initial={{ opacity: 0 }}
+   916→   982→              animate={{ opacity: 1 }}
+   917→   983→              exit={{ opacity: 0 }}
+   918→   984→              className="fixed inset-0 z-50 bg-black/85 backdrop-blur-md flex items-center justify-center p-4"
+   919→   985→            >
+   920→   986→              <motion.div
+   921→   987→                initial={{ scale: 0.5, opacity: 0 }}
+   922→   988→                animate={{ scale: 1, opacity: 1 }}
+   923→   989→                exit={{ scale: 0.5, opacity: 0 }}
+   924→   990→                transition={{ type: 'spring', stiffness: 200, damping: 15 }}
+   925→   991→                className={`glass-strong rounded-2xl p-8 max-w-sm w-full text-center border ${
+   926→   992→                  tradeResult.win ? 'border-emerald-500/30' : 'border-red-500/30'
+   927→   993→                }`}
+   928→   994→              >
+   929→   995→                <motion.div
+   930→   996→                  initial={{ scale: 0, rotate: -180 }}
+   931→   997→                  animate={{ scale: 1, rotate: 0 }}
+   932→   998→                  transition={{ type: 'spring', stiffness: 200, delay: 0.1 }}
+   933→   999→                  className={`w-24 h-24 rounded-full mx-auto mb-4 flex items-center justify-center ${
+   934→  1000→                    tradeResult.win ? 'bg-emerald-500/20' : 'bg-red-500/20'
+   935→  1001→                  }`}
+   936→  1002→                >
+   937→  1003→                  {tradeResult.win ? (
+   938→  1004→                    <Trophy className="w-12 h-12 text-emerald-400" />
+   939→  1005→                  ) : (
+   940→  1006→                    <XCircle className="w-12 h-12 text-red-400" />
+   941→  1007→                  )}
+   942→  1008→                </motion.div>
+   943→  1009→
+   944→  1010→                <motion.h3
+   945→  1011→                  initial={{ opacity: 0, y: 10 }}
+   946→  1012→                  animate={{ opacity: 1, y: 0 }}
+   947→  1013→                  transition={{ delay: 0.2 }}
+   948→  1014→                  className={`text-2xl font-bold mb-2 ${
+   949→  1015→                    tradeResult.win ? 'text-emerald-400' : 'text-red-400'
+   950→  1016→                  }`}
+   951→  1017→                >
+   952→  1018→                  {tradeResult.win ? 'You Won!' : 'You Lost'}
+   953→  1019→                </motion.h3>
+   954→  1020→
+   955→  1021→                <motion.p
+   956→  1022→                  initial={{ opacity: 0, y: 10 }}
+   957→  1023→                  animate={{ opacity: 1, y: 0 }}
+   958→  1024→                  transition={{ delay: 0.3 }}
+   959→  1025→                  className="text-sm text-muted-foreground mb-4"
+   960→  1026→                >
+   961→  1027→                  {tradeResult.message}
+   962→  1028→                </motion.p>
+   963→  1029→
+   964→  1030→                {tradeResult.win ? (
+   965→  1031→                  <motion.div
+   966→  1032→                    initial={{ opacity: 0, y: 10 }}
+   967→  1033→                    animate={{ opacity: 1, y: 0 }}
+   968→  1034→                    transition={{ delay: 0.4 }}
+   969→  1035→                    className="glass rounded-lg p-3 text-sm space-y-1.5 mb-4"
+   970→  1036→                  >
+   971→  1037→                    <div className="flex justify-between">
+   972→  1038→                      <span className="text-muted-foreground">Investment</span>
+   973→  1039→                      <span className="font-medium">{formatNaira(tradeResult.amount ?? amountNum)}</span>
+   974→  1040→                    </div>
+   975→  1041→                    <div className="flex justify-between">
+   976→  1042→                      <span className="text-muted-foreground">Multiplier</span>
+   977→  1043→                      <span className="font-medium text-gold">{(tradeResult.multiplier ?? 1).toFixed(2)}x</span>
+   978→  1044→                    </div>
+   979→  1045→                    <div className="flex justify-between">
+   980→  1046→                      <span className="text-muted-foreground">Total Return</span>
+   981→  1047→                      <span className="font-medium text-emerald-400">{formatNaira(tradeResult.totalReturn)}</span>
+   982→  1048→                    </div>
+   983→  1049→                    <div className="border-t border-white/10 pt-1.5 flex justify-between">
+   984→  1050→                      <span className="text-muted-foreground font-medium">Profit</span>
+   985→  1051→                      <span className="font-bold text-emerald-400">+{formatNaira(tradeResult.profit)}</span>
+   986→  1052→                    </div>
+   987→  1053→                  </motion.div>
+   988→  1054→                ) : (
+   989→  1055→                  <motion.div
+   990→  1056→                    initial={{ opacity: 0, y: 10 }}
+   991→  1057→                    animate={{ opacity: 1, y: 0 }}
+   992→  1058→                    transition={{ delay: 0.4 }}
+   993→  1059→                    className="text-4xl font-bold font-mono mb-4 text-red-400"
+   994→  1060→                  >
+   995→  1061→                    -{formatNaira(tradeResult.amount ?? amountNum)}
+   996→  1062→                  </motion.div>
+   997→  1063→                )}
+   998→  1064→
+   999→  1065→                {/* Trade ID */}
+  1000→  1066→                {monitorInfoRef.current && (
+  1001→  1067→                  <p className="text-[10px] text-muted-foreground tracking-wider mb-4">
+  1002→  1068→                    Trade #{monitorInfoRef.current.tradeId}
+  1003→  1069→                  </p>
+  1004→  1070→                )}
+  1005→  1071→
+  1006→  1072→                <Button
+  1007→  1073→                  onClick={() => {
+  1008→  1074→                    if (resultAutoReturnRef.current) { clearTimeout(resultAutoReturnRef.current); resultAutoReturnRef.current = null; }
+  1009→  1075→                    setTradeResult(null);
+  1010→  1076→                    setTradePhase('idle');
+  1011→  1077→                    monitorInfoRef.current = null;
+  1012→  1078→                  }}
+  1013→  1079→                  className={`w-full font-semibold h-11 ${
+  1014→  1080→                    tradeResult.win
+  1015→  1081→                      ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 hover:bg-emerald-500/30'
+  1016→  1082→                      : 'bg-red-500/20 text-red-400 border border-red-500/30 hover:bg-red-500/30'
+  1017→  1083→                  }`}
+  1018→  1084→                >
+  1019→  1085→                  Continue Trading
+  1020→  1086→                </Button>
+  1021→  1087→
+  1022→  1088→                <p className="text-[10px] text-muted-foreground mt-3">Auto-returns in 3 seconds...</p>
+  1023→  1089→              </motion.div>
+  1024→  1090→            </motion.div>
+  1025→  1091→          )}
+  1026→  1092→        </AnimatePresence>
+  1027→  1093→
+  1028→  1094→        {/* Trade History */}
+  1029→  1095→        <motion.div
+  1030→  1096→          initial={{ opacity: 0, y: 20 }}
+  1031→  1097→          animate={{ opacity: 1, y: 0 }}
+  1032→  1098→          transition={{ delay: 0.2 }}
+  1033→  1099→          className="glass rounded-xl p-4"
+  1034→  1100→        >
+  1035→  1101→          <div className="flex items-center justify-between mb-3">
+  1036→  1102→            <div className="flex items-center gap-2">
+  1037→  1103→              <History className="w-4 h-4 text-muted-foreground" />
+  1038→  1104→              <h2 className="font-semibold text-sm">Trade History</h2>
+  1039→  1105→            </div>
+  1040→  1106→            <div className="flex gap-1">
+  1041→  1107→              {HISTORY_FILTERS.map((f) => (
+  1042→  1108→                <button
+  1043→  1109→                  key={f.value}
+  1044→  1110→                  onClick={() => setHistoryFilter(f.value)}
+  1045→  1111→                  className={`px-3 py-1 rounded-lg text-xs font-medium transition-colors ${
+  1046→  1112→                    historyFilter === f.value
+  1047→  1113→                      ? 'glass-strong text-gold'
+  1048→  1114→                      : 'text-muted-foreground hover:text-foreground hover:bg-white/5'
+  1049→  1115→                  }`}
+  1050→  1116→                >
+  1051→  1117→                  {f.label}
+  1052→  1118→                </button>
+  1053→  1119→              ))}
+  1054→  1120→            </div>
+  1055→  1121→          </div>
+  1056→  1122→
+  1057→  1123→          {historyLoading ? (
+  1058→  1124→            <div className="space-y-2">
+  1059→  1125→              {Array.from({ length: 3 }).map((_, i) => (
+  1060→  1126→                <Skeleton key={i} className="h-12 rounded-lg bg-white/5" />
+  1061→  1127→              ))}
+  1062→  1128→            </div>
+  1063→  1129→          ) : filteredHistory.length === 0 ? (
+  1064→  1130→            <div className="text-center py-8">
+  1065→  1131→              <Filter className="w-8 h-8 text-muted-foreground/40 mx-auto mb-2" />
+  1066→  1132→              <p className="text-sm text-muted-foreground">No trades found</p>
+  1067→  1133→            </div>
+  1068→  1134→          ) : (
+  1069→  1135→            <div className="max-h-80 overflow-y-auto scrollbar-thin -mx-1">
+  1070→  1136→              <Table>
+  1071→  1137→                <TableHeader>
+  1072→  1138→                  <TableRow className="border-white/5 hover:bg-transparent">
+  1073→  1139→                    <TableHead className="text-[10px] text-muted-foreground">Date</TableHead>
+  1074→  1140→                    <TableHead className="text-[10px] text-muted-foreground">Side</TableHead>
+  1075→  1141→                    <TableHead className="text-[10px] text-muted-foreground text-right">Amount</TableHead>
+  1076→  1142→                    <TableHead className="text-[10px] text-muted-foreground text-right">Multi</TableHead>
+  1077→  1143→                    <TableHead className="text-[10px] text-muted-foreground text-right">Time</TableHead>
+  1078→  1144→                    <TableHead className="text-[10px] text-muted-foreground text-right">Result</TableHead>
+  1079→  1145→                    <TableHead className="text-[10px] text-muted-foreground text-right">P/L</TableHead>
+  1080→  1146→                  </TableRow>
+  1081→  1147→                </TableHeader>
+  1082→  1148→                <TableBody>
+  1083→  1149→                  {filteredHistory.map((trade) => (
+  1084→  1150→                    <TableRow key={trade.id} className="border-white/5">
+  1085→  1151→                      <TableCell className="text-xs text-muted-foreground py-2">
+  1086→  1152→                        {new Date(trade.createdAt).toLocaleDateString('en-US', {
+  1087→  1153→                          month: 'short',
+  1088→  1154→                          day: 'numeric',
+  1089→  1155→                        })}
+  1090→  1156→                      </TableCell>
+  1091→  1157→                      <TableCell className="py-2">
+  1092→  1158→                        <Badge
+  1093→  1159→                          className={`text-[10px] gap-0.5 ${
+  1094→  1160→                            trade.prediction === 'UP'
+  1095→  1161→                              ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20'
+  1096→  1162→                              : 'bg-red-500/10 text-red-400 border-red-500/20'
+  1097→  1163→                          }`}
+  1098→  1164→                        >
+  1099→  1165→                          {trade.prediction === 'UP' ? (
+  1100→  1166→                            <ArrowUpCircle className="w-3 h-3" />
+  1101→  1167→                          ) : (
+  1102→  1168→                            <ArrowDownCircle className="w-3 h-3" />
+  1103→  1169→                          )}
+  1104→  1170→                          {trade.prediction}
+  1105→  1171→                        </Badge>
+  1106→  1172→                      </TableCell>
+  1107→  1173→                      <TableCell className="text-xs font-medium text-right py-2">
+  1108→  1174→                        {formatNaira(trade.amount)}
+  1109→  1175→                      </TableCell>
+  1110→  1176→                      <TableCell className="text-xs text-muted-foreground text-right py-2">
+  1111→  1177→                        {(trade.multiplier ?? 1).toFixed(2)}x
+  1112→  1178→                      </TableCell>
+  1113→  1179→                      <TableCell className="text-xs text-muted-foreground text-right py-2">
+  1114→  1180→                        {DURATION_OPTIONS.find((d) => d.value === trade.duration)?.label || `${trade.duration}s`}
+  1115→  1181→                      </TableCell>
+  1116→  1182→                      <TableCell className="text-right py-2">
+  1117→  1183→                        <Badge
+  1118→  1184→                          className={`text-[10px] ${
+  1119→  1185→                            trade.result === 'win'
+  1120→  1186→                              ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20'
+  1121→  1187→                              : 'bg-red-500/10 text-red-400 border-red-500/20'
+  1122→  1188→                          }`}
+  1123→  1189→                        >
+  1124→  1190→                          {trade.result === 'win' ? (
+  1125→  1191→                            <CheckCircle2 className="w-3 h-3 mr-0.5" />
+  1126→  1192→                          ) : (
+  1127→  1193→                            <XCircle className="w-3 h-3 mr-0.5" />
+  1128→  1194→                          )}
+  1129→  1195→                          {trade.result.toUpperCase()}
+  1130→  1196→                        </Badge>
+  1131→  1197→                      </TableCell>
+  1132→  1198→                      <TableCell
+  1133→  1199→                        className={`text-xs font-bold text-right py-2 ${
+  1134→  1200→                          trade.profit >= 0 ? 'text-emerald-400' : 'text-red-400'
+  1135→  1201→                        }`}
+  1136→  1202→                      >
+  1137→  1203→                        {trade.profit >= 0 ? '+' : ''}{formatNaira(trade.profit)}
+  1138→  1204→                      </TableCell>
+  1139→  1205→                    </TableRow>
+  1140→  1206→                  ))}
+  1141→  1207→                </TableBody>
+  1142→  1208→              </Table>
+  1143→  1209→            </div>
+  1144→  1210→          )}
+  1145→  1211→        </motion.div>
+  1146→  1212→      </main>
+  1147→  1213→    </div>
+  1148→  1214→  );
+  1149→  1215→}
+  1150→  1216→

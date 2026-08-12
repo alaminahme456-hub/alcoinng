@@ -27,7 +27,7 @@ import {
   ArrowLeft, TrendingUp, Wallet, PiggyBank, TrendingUpIcon,
   ArrowUpCircle, ArrowDownCircle, Loader2,
   Trophy, XCircle, CheckCircle2, Clock, History, Filter,
-  CheckCircle, ArrowUp, ArrowDown, Home, Eye,
+  CheckCircle, ArrowUp, ArrowDown,
 } from 'lucide-react';
 import {
   XAxis,
@@ -350,15 +350,6 @@ function MarketView() {
           fetchHistory();
           refreshWallets();
           forceUpdate((n) => n + 1);
-
-          // Auto-return to Place Trade after 3 seconds
-          if (resultAutoReturnRef.current) clearTimeout(resultAutoReturnRef.current);
-          resultAutoReturnRef.current = setTimeout(() => {
-            setTradeResult(null);
-            setTradePhase('idle');
-            monitorInfoRef.current = null;
-            resultAutoReturnRef.current = null;
-          }, 3000);
         }
       }
     }, 1000);
@@ -455,10 +446,10 @@ function MarketView() {
         refreshWallets();
         fetchHistory();
       } else {
-        // Start countdown, transition confirmed → monitoring after 1.5s
+        // Start countdown, return to normal UI after 1.5s
         startCountdown(duration);
         setTimeout(() => {
-          if (tradingRef.current) setTradePhase('monitoring');
+          if (tradingRef.current) setTradePhase('idle');
         }, 1500);
         pendingTradeResult.current = precomputed;
       }
@@ -821,158 +812,57 @@ function MarketView() {
                   transition={{ delay: 0.5 }}
                   className="flex items-center justify-center gap-2 text-gold text-sm font-medium"
                 >
-                  <Eye className="w-4 h-4" />
-                  <span>Opening Market Monitor...</span>
-                  <Loader2 className="w-4 h-4 animate-spin" />
+                  <Clock className="w-4 h-4" />
+                  <span>Trade running in background...</span>
                 </motion.div>
               </motion.div>
             </motion.div>
           )}
         </AnimatePresence>
 
-        {/* ═══════ PHASE 2: Market Monitor ═══════ */}
+        {/* ═══════ Floating Trade-In-Progress Indicator ═══════ */}
         <AnimatePresence>
-          {tradePhase === 'monitoring' && monitorInfoRef.current && (
+          {trading && tradingRef.current && tradePhase === 'idle' && monitorInfoRef.current && (
             <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              className="fixed inset-0 z-50 bg-[#09090b] flex flex-col"
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: 20 }}
+              className="fixed bottom-20 left-4 right-4 z-40 max-w-2xl mx-auto"
             >
-              {/* Monitor Header */}
-              <div className="glass-strong px-4 py-3 flex items-center justify-between shrink-0">
-                <div className="flex items-center gap-2">
-                  <Eye className="w-4 h-4 text-gold" />
-                  <span className="font-semibold text-sm">TRADE IN PROGRESS</span>
-                </div>
-                <div className="flex items-center gap-1.5">
-                  <div className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-                  <span className="text-[10px] text-emerald-400 font-medium">LIVE</span>
-                </div>
-              </div>
-
-              {/* Monitor Body */}
-              <div className="flex-1 overflow-y-auto px-4 py-4 max-w-lg mx-auto w-full space-y-4">
-                {/* Countdown */}
-                <div className="text-center">
-                  <p className="text-xs text-muted-foreground mb-1 tracking-wider uppercase">Time Remaining</p>
-                  <p className={`text-5xl sm:text-6xl font-bold font-mono ${
-                    monitorInfoRef.current.prediction === 'UP' ? 'text-emerald-400' : 'text-red-400'
-                  }`}>
-                    {formatCountdown(Math.max(0, countdownDisplayRef.current))}
-                  </p>
-                </div>
-
-                {/* Progress Bar */}
-                <div className="w-full h-2 rounded-full bg-white/10 overflow-hidden">
-                  <div
-                    className={`h-full rounded-full transition-all duration-1000 ${
-                      monitorInfoRef.current.prediction === 'UP' ? 'bg-emerald-500' : 'bg-red-500'
-                    }`}
-                    style={{ width: `${Math.max(0, ((monitorInfoRef.current.duration - Math.max(0, countdownDisplayRef.current)) / monitorInfoRef.current.duration) * 100)}%` }}
-                  />
-                </div>
-
-                {/* Live Chart */}
-                <div className="glass rounded-xl p-3">
-                  <div className="flex items-center justify-between mb-2">
-                    <span className="text-xs text-muted-foreground">Live Chart</span>
-                    <span className={`text-xs font-medium flex items-center gap-1 ${
-                      currentPrice != null && currentPrice > monitorInfoRef.current.startPrice ? 'text-emerald-400'
-                        : currentPrice != null && currentPrice < monitorInfoRef.current.startPrice ? 'text-red-400' : 'text-gold'
-                    }`}>
-                      {currentPrice != null && currentPrice > monitorInfoRef.current.startPrice ? <ArrowUp className="w-3 h-3" /> : null}
-                      {currentPrice != null && currentPrice < monitorInfoRef.current.startPrice ? <ArrowDown className="w-3 h-3" /> : null}
-                      {currentPrice != null && currentPrice > monitorInfoRef.current.startPrice ? 'Up'
-                        : currentPrice != null && currentPrice < monitorInfoRef.current.startPrice ? 'Down' : 'Neutral'}
-                    </span>
+              <div className="glass-strong rounded-xl p-3 flex items-center justify-between border border-gold/20">
+                <div className="flex items-center gap-3 min-w-0">
+                  <div className="w-9 h-9 rounded-lg flex items-center justify-center shrink-0 bg-amber-500/15 border border-amber-500/20">
+                    <div className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
                   </div>
-                  <div className="h-36 sm:h-44">
-                    <ResponsiveContainer width="100%" height="100%">
-                      <AreaChart data={priceData} margin={{ top: 5, right: 5, left: -20, bottom: 0 }}>
-                        <defs>
-                          <linearGradient id="monGradUp" x1="0" y1="0" x2="0" y2="1">
-                            <stop offset="0%" stopColor="#34d399" stopOpacity={0.3} />
-                            <stop offset="100%" stopColor="#34d399" stopOpacity={0} />
-                          </linearGradient>
-                          <linearGradient id="monGradDn" x1="0" y1="0" x2="0" y2="1">
-                            <stop offset="0%" stopColor="#f87171" stopOpacity={0.3} />
-                            <stop offset="100%" stopColor="#f87171" stopOpacity={0} />
-                          </linearGradient>
-                        </defs>
-                        <CartesianGrid strokeDasharray="3 3" stroke="rgba(212,175,55,0.08)" vertical={false} />
-                        <XAxis dataKey="time" tick={{ fontSize: 9, fill: '#8888a0' }} axisLine={{ stroke: 'rgba(255,255,255,0.06)' }} tickLine={false} interval="preserveStartEnd" />
-                        <YAxis domain={['auto','auto']} tick={{ fontSize: 9, fill: '#8888a0' }} axisLine={{ stroke: 'rgba(255,255,255,0.06)' }} tickLine={false} tickFormatter={(v: any) => v != null ? Number(v).toFixed(0) : ''} />
-                        <Area
-                          type="monotone" dataKey="price"
-                          stroke={currentPrice != null && currentPrice >= monitorInfoRef.current.startPrice ? '#34d399' : '#f87171'}
-                          strokeWidth={2}
-                          fill={currentPrice != null && currentPrice >= monitorInfoRef.current.startPrice ? 'url(#monGradUp)' : 'url(#monGradDn)'}
-                          dot={false} isAnimationActive={false}
-                        />
-                      </AreaChart>
-                    </ResponsiveContainer>
+                  <div className="min-w-0">
+                    <p className="text-xs font-semibold truncate">Trade in Progress</p>
+                    <p className="text-[10px] text-muted-foreground">
+                      {monitorInfoRef.current.prediction === 'UP' ? 'BUY' : 'SELL'} · {formatNaira(monitorInfoRef.current.amount)}
+                    </p>
                   </div>
                 </div>
-
-                {/* Trade Details */}
-                <div className="glass rounded-xl p-4 space-y-3">
-                  <div className="flex justify-between items-center">
-                    <span className="text-xs text-muted-foreground">Prediction</span>
-                    <span className={`text-sm font-bold flex items-center gap-1.5 ${
+                <div className="flex items-center gap-3 shrink-0">
+                  <div className="text-right">
+                    <p className={`text-lg font-bold font-mono ${
                       monitorInfoRef.current.prediction === 'UP' ? 'text-emerald-400' : 'text-red-400'
                     }`}>
-                      {monitorInfoRef.current.prediction === 'UP' ? <ArrowUpCircle className="w-4 h-4" /> : <ArrowDownCircle className="w-4 h-4" />}
-                      {monitorInfoRef.current.prediction === 'UP' ? 'BUY' : 'SELL'}
-                    </span>
+                      {formatCountdown(Math.max(0, countdownDisplayRef.current))}
+                    </p>
                   </div>
-                  <div className="flex justify-between items-center">
-                    <span className="text-xs text-muted-foreground">Starting Value</span>
-                    <span className="text-sm font-mono font-medium">{formatNaira(monitorInfoRef.current.startPrice)}</span>
-                  </div>
-                  <div className="flex justify-between items-center">
-                    <span className="text-xs text-muted-foreground">Current Value</span>
-                    <span className={`text-sm font-mono font-bold ${
-                      currentPrice != null && currentPrice > monitorInfoRef.current.startPrice ? 'text-emerald-400'
-                        : currentPrice != null && currentPrice < monitorInfoRef.current.startPrice ? 'text-red-400' : 'text-foreground'
-                    }`}>
-                      {currentPrice != null ? formatNaira(currentPrice) : '---'}
-                    </span>
-                  </div>
-                  <div className="h-px bg-white/5" />
-                  <div className="flex justify-between items-center">
-                    <span className="text-xs text-muted-foreground">Status</span>
-                    <span className="text-xs font-bold px-2.5 py-1 rounded-full bg-amber-500/15 text-amber-400 border border-amber-500/20">ACTIVE</span>
-                  </div>
-                  <div className="flex justify-between items-center">
-                    <span className="text-xs text-muted-foreground">Trade Start</span>
-                    <span className="text-xs font-mono">{new Date(monitorInfoRef.current.startTime).toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' })}</span>
-                  </div>
-                  <div className="flex justify-between items-center">
-                    <span className="text-xs text-muted-foreground">Trade End</span>
-                    <span className="text-xs font-mono">{new Date(monitorInfoRef.current.endTime).toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' })}</span>
-                  </div>
-                  <div className="flex justify-between items-center">
-                    <span className="text-xs text-muted-foreground">Investment</span>
-                    <span className="text-sm font-medium">{formatNaira(monitorInfoRef.current.amount)}</span>
+                  <div className="w-12 h-1.5 rounded-full bg-white/10 overflow-hidden">
+                    <div
+                      className={`h-full rounded-full transition-all duration-1000 ${
+                        monitorInfoRef.current.prediction === 'UP' ? 'bg-emerald-500' : 'bg-red-500'
+                      }`}
+                      style={{ width: `${Math.max(0, ((monitorInfoRef.current.duration - Math.max(0, countdownDisplayRef.current)) / monitorInfoRef.current.duration) * 100)}%` }}
+                    />
                   </div>
                 </div>
-
-                {/* Trade ID */}
-                <p className="text-center text-[10px] text-muted-foreground tracking-wider">Trade #{monitorInfoRef.current.tradeId}</p>
-
-                {/* Back to Dashboard */}
-                <button
-                  onClick={() => { stopCountdown(); pendingTradeResult.current = null; if (resultAutoReturnRef.current) { clearTimeout(resultAutoReturnRef.current); resultAutoReturnRef.current = null; } setTrading(false); tradingRef.current = false; setTradePhase('idle'); monitorInfoRef.current = null; setView('dashboard'); }}
-                  className="w-full h-11 rounded-xl bg-white/5 border border-white/10 text-sm font-medium flex items-center justify-center gap-2 hover:bg-white/10 transition-colors"
-                >
-                  <Home className="w-4 h-4" />
-                  Back to Dashboard
-                </button>
               </div>
             </motion.div>
           )}
         </AnimatePresence>
+
 
         {/* ═══════ PHASE 4: Trade Result ═══════ */}
         <AnimatePresence>
@@ -1015,7 +905,7 @@ function MarketView() {
                     tradeResult.win ? 'text-emerald-400' : 'text-red-400'
                   }`}
                 >
-                  {tradeResult.win ? 'You Won!' : 'You Lost'}
+                  {tradeResult.win ? 'Congratulations! You Won!' : 'Trade Lost'}
                 </motion.h3>
 
                 <motion.p
@@ -1082,10 +972,8 @@ function MarketView() {
                       : 'bg-red-500/20 text-red-400 border border-red-500/30 hover:bg-red-500/30'
                   }`}
                 >
-                  Continue Trading
+                  Cancel
                 </Button>
-
-                <p className="text-[10px] text-muted-foreground mt-3">Auto-returns in 3 seconds...</p>
               </motion.div>
             </motion.div>
           )}
