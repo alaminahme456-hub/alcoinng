@@ -47,6 +47,8 @@ interface AppState {
   setUnreadCount: (n: number) => void;
   sidebarOpen: boolean;
   setSidebarOpen: (o: boolean) => void;
+  pendingRef: string | null;
+  setPendingRef: (r: string | null) => void;
   logout: () => void;
 }
 
@@ -66,6 +68,8 @@ export const useAppStore = create<AppState>((set) => ({
   setUnreadCount: (n) => set({ unreadCount: n }),
   sidebarOpen: false,
   setSidebarOpen: (o) => set({ sidebarOpen: o }),
+  pendingRef: null,
+  setPendingRef: (r) => set({ pendingRef: r }),
   logout: () => {
     sessionGeneration++;
     set({ user: null, token: null, view: 'landing', wallets: { reward: 0, deposit: 0, profit: 0 } });
@@ -78,6 +82,17 @@ export const useAppStore = create<AppState>((set) => ({
  */
 export function initializeStore() {
   const myGeneration = sessionGeneration;
+
+  // Capture ?ref= from URL before anything else
+  if (typeof window !== 'undefined') {
+    const params = new URLSearchParams(window.location.search);
+    const ref = params.get('ref');
+    if (ref) {
+      useAppStore.getState().setPendingRef(ref);
+      // Clean URL without reloading
+      window.history.replaceState({}, '', window.location.pathname);
+    }
+  }
 
   fetch('/api/auth/session')
     .then((r) => r.json())

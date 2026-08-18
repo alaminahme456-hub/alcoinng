@@ -10,7 +10,7 @@ import { Label } from '@/components/ui/label';
 import { User, Phone, UserPlus, ArrowRight, ShieldCheck } from 'lucide-react';
 
 export default function AuthView() {
-  const { view, setView, setUser, setToken } = useAppStore();
+  const { view, setView, setUser, setToken, pendingRef, setPendingRef } = useAppStore();
   const { isSignedIn, isLoaded, user } = useUser();
   const { signOut } = useAuth();
   const isLogin = view === 'login';
@@ -22,6 +22,14 @@ export default function AuthView() {
   const [profileLoading, setProfileLoading] = useState(false);
   const [profileError, setProfileError] = useState('');
   const [checkingProfile, setCheckingProfile] = useState(false);
+
+  // Pre-fill referral code from pendingRef (captured from ?ref= URL param)
+  useEffect(() => {
+    if (pendingRef && !referralCode) {
+      setReferralCode(pendingRef);
+      setPendingRef(null);
+    }
+  }, [pendingRef]);
 
   // After Clerk auth succeeds, check for existing profile or show completion form
   useEffect(() => {

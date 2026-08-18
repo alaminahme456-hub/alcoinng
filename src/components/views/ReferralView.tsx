@@ -41,8 +41,19 @@ export default function ReferralView() {
 
   const fetchReferrals = useCallback(async () => {
     try {
-      const res = await apiFetch('/api/user/referrals');
-      setData(res);
+      const res = await apiFetch('/api/referral');
+      setData({
+        totalReferrals: res.totalReferrals || 0,
+        activeReferrals: res.activeReferrals || 0,
+        referralEarnings: res.referralEarnings || 0,
+        referredUsers: (res.referrals || []).map((r: any) => ({
+          id: r.id,
+          fullName: r.fullName,
+          username: r.username,
+          isActive: Boolean(r.isActivated),
+          createdAt: r.createdAt,
+        })),
+      });
     } catch {
       // silent
     } finally {
