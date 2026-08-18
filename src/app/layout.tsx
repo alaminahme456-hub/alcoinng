@@ -27,7 +27,47 @@ export const viewport: Viewport = {
 export const metadata: Metadata = {
   title: "ALCOIN - Digital Rewards Platform",
   description: "Earn rewards, invest, and withdraw with ALCOIN. Activate your account, complete tasks, watch ads, and trade on the AL Coin Market.",
-  keywords: ["ALCOIN", "rewards", "earn money", "digital rewards", "AL Coin Market"],
+  keywords: ["ALCOIN", "digital rewards", "earn money online", "AL Coin Market", "watch and earn", "referral program", "Nigeria", "make money online", "task rewards", "ad rewards"],
+  authors: [{ name: 'ALCOIN' }],
+  creator: 'ALCOIN',
+  publisher: 'ALCOIN',
+  metadataBase: new URL('https://alcoinng.vercel.app'),
+  alternates: {
+    canonical: '/',
+  },
+  openGraph: {
+    type: 'website',
+    locale: 'en_NG',
+    url: 'https://alcoinng.vercel.app',
+    siteName: 'ALCOIN',
+    title: 'ALCOIN - Digital Rewards Platform',
+    description: 'Earn rewards by watching ads, completing tasks, referring friends, and trading on the AL Coin Market. Join ALCOIN today!',
+    images: [
+      {
+        url: '/alcoin-logo.jpg',
+        width: 512,
+        height: 512,
+        alt: 'ALCOIN Logo',
+      },
+    ],
+  },
+  twitter: {
+    card: 'summary',
+    title: 'ALCOIN - Digital Rewards Platform',
+    description: 'Earn rewards by watching ads, completing tasks, referring friends, and trading on the AL Coin Market.',
+    images: ['/alcoin-logo.jpg'],
+  },
+  robots: {
+    index: true,
+    follow: true,
+    googleBot: {
+      index: true,
+      follow: true,
+      'max-video-preview': -1,
+      'max-image-preview': 'large',
+      'max-snippet': -1,
+    },
+  },
   manifest: '/manifest.json',
   appleWebApp: {
     capable: true,
