@@ -361,15 +361,51 @@ export default function LandingView() {
       </section>
 
       {/* ─── Footer ─── */}
-      <footer className="border-t border-white/[0.06] py-8 px-4">
-        <div className="max-w-6xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-4">
-          <div className="flex items-center gap-2">
-            <img src="/alcoin-logo.jpg" alt="ALCOIN" className="w-6 h-6 rounded" />
-            <span className="text-sm font-semibold gradient-gold-text">ALCOIN</span>
+      <footer className="border-t border-white/[0.06] py-10 px-4">
+        <div className="max-w-6xl mx-auto">
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-8 mb-8">
+            <div>
+              <div className="flex items-center gap-2 mb-4">
+                <img src="/alcoin-logo.jpg" alt="ALCOIN" className="w-6 h-6 rounded" />
+                <span className="text-sm font-semibold gradient-gold-text">ALCOIN</span>
+              </div>
+              <p className="text-xs text-muted-foreground leading-relaxed">
+                A digital rewards platform that turns your spare time into earning.
+              </p>
+            </div>
+            <div>
+              <h4 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-3">Platform</h4>
+              <div className="space-y-2">
+                <a href="/" className="block text-sm text-muted-foreground hover:text-gold transition-colors">Home</a>
+                <a href="/about" className="block text-sm text-muted-foreground hover:text-gold transition-colors">About Us</a>
+                <a href="/contact" className="block text-sm text-muted-foreground hover:text-gold transition-colors">Contact</a>
+              </div>
+            </div>
+            <div>
+              <h4 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-3">Legal</h4>
+              <div className="space-y-2">
+                <a href="/terms" className="block text-sm text-muted-foreground hover:text-gold transition-colors">Terms &amp; Conditions</a>
+                <a href="/privacy" className="block text-sm text-muted-foreground hover:text-gold transition-colors">Privacy Policy</a>
+              </div>
+            </div>
+            <div>
+              <h4 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-3">Get Started</h4>
+              <div className="space-y-2">
+                <button onClick={() => setView('register')} className="block text-sm text-muted-foreground hover:text-gold transition-colors">Sign Up</button>
+                <button onClick={() => setView('login')} className="block text-sm text-muted-foreground hover:text-gold transition-colors">Sign In</button>
+              </div>
+            </div>
           </div>
-          <p className="text-xs text-muted-foreground">
-            &copy; {new Date().getFullYear()} ALCOIN. All rights reserved.
-          </p>
+          <div className="border-t border-white/[0.06] pt-6 flex flex-col sm:flex-row items-center justify-between gap-3">
+            <p className="text-xs text-muted-foreground">
+              &copy; {new Date().getFullYear()} ALCOIN. All rights reserved.
+            </p>
+            <div className="flex items-center gap-4">
+              <a href="/terms" className="text-xs text-muted-foreground hover:text-gold transition-colors">Terms</a>
+              <a href="/privacy" className="text-xs text-muted-foreground hover:text-gold transition-colors">Privacy</a>
+              <a href="/contact" className="text-xs text-muted-foreground hover:text-gold transition-colors">Contact</a>
+            </div>
+          </div>
         </div>
       </footer>
     </div>
