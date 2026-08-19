@@ -31,14 +31,14 @@ export const metadata: Metadata = {
   authors: [{ name: 'ALCOIN' }],
   creator: 'ALCOIN',
   publisher: 'ALCOIN',
-  metadataBase: new URL('https://alcoinng.vercel.app'),
+  metadataBase: new URL('https://alcoinng.com'),
   alternates: {
     canonical: '/',
   },
   openGraph: {
     type: 'website',
     locale: 'en_NG',
-    url: 'https://alcoinng.vercel.app',
+    url: 'https://alcoinng.com',
     siteName: 'ALCOIN',
     title: 'ALCOIN - Digital Rewards Platform',
     description: 'Earn rewards by watching ads, completing tasks, referring friends, and trading on the AL Coin Market. Join ALCOIN today!',
