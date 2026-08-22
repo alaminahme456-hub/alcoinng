@@ -145,9 +145,6 @@ export default function ActivateView() {
                   spellCheck={false}
                 />
               </div>
-              <p className="text-xs text-muted-foreground">
-                Format: ALC followed by 3 digits (e.g. ALC001, ALC427, ALC999)
-              </p>
             </div>
 
             {/* Client-side format error */}
