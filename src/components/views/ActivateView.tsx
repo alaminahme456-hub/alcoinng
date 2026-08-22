@@ -1,13 +1,15 @@
 'use client';
 
-import { useState } from 'react';
-import { motion } from 'framer-motion';
+import { useState, useMemo } from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
 import { useAppStore, apiFetch } from '@/store';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
-import { ArrowLeft, ShieldCheck, ShieldX, KeyRound, MessageCircle, CheckCircle2 } from 'lucide-react';
+import { ArrowLeft, ShieldCheck, ShieldX, KeyRound, MessageCircle, CheckCircle2, AlertCircle } from 'lucide-react';
+
+const ALC_FORMAT = /^ALC[0-9]{3}$/;
 
 export default function ActivateView() {
   const { user, setView, setUser } = useAppStore();
@@ -16,12 +18,37 @@ export default function ActivateView() {
   const [error, setError] = useState('');
   const [success, setSuccess] = useState(false);
 
-  const whatsappMessage = encodeURIComponent(`Hello, I want to get an activation code for my ALCOIN account.\n\nUsername: ${user?.username || ''}`);
+  // Client-side format validation
+  const formatError = useMemo(() => {
+    if (!code) return '';
+    if (code.length < 6) return '';
+    if (!ALC_FORMAT.test(code.toUpperCase())) {
+      return 'Enter a valid ALCOIN activation code, for example ALC001.';
+    }
+    return '';
+  }, [code]);
+
+  const whatsappMessage = encodeURIComponent(
+    `Hello ALCOIN Admin, I would like to activate my account. I need a ₦5,000 activation code. Username: ${user?.username || ''}. Email: ${user?.email || ''}.`,
+  );
   const whatsappLink = `https://wa.me/2348000000000?text=${whatsappMessage}`;
+
+  const handleCodeChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const val = e.target.value.toUpperCase().replace(/[^ALC0-9]/g, '').slice(0, 6);
+    setCode(val);
+    if (error) setError('');
+  };
 
   const handleActivate = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!code.trim()) return;
+
+    // Client-side format check
+    if (!ALC_FORMAT.test(code)) {
+      setError('Enter a valid ALCOIN activation code, for example ALC001.');
+      return;
+    }
+
     setLoading(true);
     setError('');
     try {
@@ -31,13 +58,15 @@ export default function ActivateView() {
       });
       if (data.user) setUser(data.user);
       setSuccess(true);
-      setTimeout(() => setView('dashboard'), 2000);
+      setTimeout(() => setView('dashboard'), 2500);
     } catch (err: any) {
       setError(err.message || 'Activation failed');
     } finally {
       setLoading(false);
     }
   };
+
+  const canSubmit = code.length === 6 && ALC_FORMAT.test(code) && !loading;
 
   return (
     <div className="min-h-screen">
@@ -83,7 +112,7 @@ export default function ActivateView() {
               </div>
               <h2 className="text-lg font-bold">Account Not Activated</h2>
               <p className="text-sm text-muted-foreground mt-2">
-                Enter your activation code below to unlock all platform features including deposits, withdrawals, and earning opportunities.
+                Enter your 6-character activation code to unlock all platform features.
               </p>
             </>
           )}
@@ -99,34 +128,61 @@ export default function ActivateView() {
             className="glass rounded-2xl p-6 space-y-5"
           >
             <div className="space-y-2">
-              <Label htmlFor="activationCode" className="text-sm text-muted-foreground">Activation Code</Label>
+              <Label htmlFor="activationCode" className="text-sm text-muted-foreground">
+                Activation Code
+              </Label>
               <div className="relative">
                 <KeyRound className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
                 <Input
                   id="activationCode"
                   type="text"
-                  placeholder="Enter your activation code"
+                  placeholder="e.g. ALC001"
                   value={code}
-                  onChange={(e) => setCode(e.target.value)}
-                  className="pl-10 bg-white/5 border-white/10 focus:border-gold h-12"
-                  required
+                  onChange={handleCodeChange}
+                  className="pl-10 bg-white/5 border-white/10 focus:border-gold h-12 font-mono text-lg tracking-widest uppercase"
+                  maxLength={6}
+                  autoComplete="off"
+                  spellCheck={false}
                 />
               </div>
+              <p className="text-xs text-muted-foreground">
+                Format: ALC followed by 3 digits (e.g. ALC001, ALC427, ALC999)
+              </p>
             </div>
 
-            {error && (
-              <motion.div
-                initial={{ opacity: 0, y: -10 }}
-                animate={{ opacity: 1, y: 0 }}
-                className="p-3 rounded-lg bg-destructive/10 border border-destructive/20 text-destructive text-sm"
-              >
-                {error}
-              </motion.div>
-            )}
+            {/* Client-side format error */}
+            <AnimatePresence>
+              {formatError && (
+                <motion.div
+                  initial={{ opacity: 0, y: -10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -10 }}
+                  className="flex items-start gap-2 p-3 rounded-lg bg-yellow-500/10 border border-yellow-500/20 text-yellow-400 text-sm"
+                >
+                  <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+                  {formatError}
+                </motion.div>
+              )}
+            </AnimatePresence>
+
+            {/* Server error */}
+            <AnimatePresence>
+              {error && !formatError && (
+                <motion.div
+                  initial={{ opacity: 0, y: -10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -10 }}
+                  className="flex items-start gap-2 p-3 rounded-lg bg-destructive/10 border border-destructive/20 text-destructive text-sm"
+                >
+                  <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+                  {error}
+                </motion.div>
+              )}
+            </AnimatePresence>
 
             <Button
               type="submit"
-              disabled={loading || !code.trim()}
+              disabled={!canSubmit}
               className="w-full gradient-gold text-gold-foreground font-semibold h-12"
             >
               {loading ? (
@@ -153,7 +209,7 @@ export default function ActivateView() {
               className="flex items-center justify-center gap-2 w-full h-12 rounded-lg bg-emerald-600/20 border border-emerald-600/30 text-emerald-400 font-semibold text-sm hover:bg-emerald-600/30 transition-colors"
             >
               <MessageCircle className="w-5 h-5" />
-              Get Activation Code via WhatsApp
+              Get Activation Code
             </a>
           </motion.form>
         )}
@@ -173,7 +229,7 @@ export default function ActivateView() {
             >
               <CheckCircle2 className="w-8 h-8 text-emerald-400" />
             </motion.div>
-            <h2 className="text-lg font-bold text-emerald-400">Activation Successful!</h2>
+            <h2 className="text-lg font-bold text-emerald-400">Account Activated Successfully</h2>
             <p className="text-sm text-muted-foreground mt-2">Redirecting to dashboard...</p>
           </motion.div>
         )}
@@ -185,7 +241,7 @@ export default function ActivateView() {
           transition={{ delay: 0.2 }}
           className="glass rounded-2xl p-6 space-y-3"
         >
-          <h3 className="font-semibold text-sm">Why Activate?</h3>
+          <h3 className="font-semibold text-sm">Activation Fee: ₦5,000</h3>
           <ul className="space-y-2 text-sm text-muted-foreground">
             <li className="flex items-start gap-2">
               <CheckCircle2 className="w-4 h-4 text-gold shrink-0 mt-0.5" />
@@ -197,7 +253,7 @@ export default function ActivateView() {
             </li>
             <li className="flex items-start gap-2">
               <CheckCircle2 className="w-4 h-4 text-gold shrink-0 mt-0.5" />
-              <span>Trade on the market and earn profits</span>
+              <span>Trade on the ALCOIN market and earn profits</span>
             </li>
             <li className="flex items-start gap-2">
               <CheckCircle2 className="w-4 h-4 text-gold shrink-0 mt-0.5" />

@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabase/admin';
 import { insertAuditLog } from '@/lib/db';
 import { requireAdmin, isAuthUser } from '@/lib/req-helpers';
-import { generateCode } from '@/lib/auth';
+import { generateRandomCode } from '@/lib/auth';
 
 export async function GET(req: NextRequest) {
   try {
@@ -67,7 +67,7 @@ export async function POST(req: NextRequest) {
     const inserts: Array<{ code: string; amount: number; status: string }> = [];
     for (let i = 0; i < numCount; i++) {
       inserts.push({
-        code: generateCode(),
+        code: generateRandomCode(),
         amount: numAmount,
         status: 'unused',
       });

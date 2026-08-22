@@ -104,7 +104,16 @@ export async function verifyOTP(profileId: string, code: string): Promise<boolea
 // Utility functions
 // ============================================================
 
-export function generateCode(length: number = 8): string {
+export function generateCode(): string {
+  // Always produces ALC### format (ALC + 3 random digits)
+  const digits = Math.floor(Math.random() * 1000).toString().padStart(3, '0');
+  return `ALC${digits}`;
+}
+
+/**
+ * Generate a random alphanumeric code for deposit codes (not ALC format).
+ */
+export function generateRandomCode(length: number = 8): string {
   const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
   let code = '';
   for (let i = 0; i < length; i++) {
