@@ -27,11 +27,14 @@ BEGIN
   END IF;
 END $$;
 
+-- Clean up old codes that don't match ALC### format
+DELETE FROM public.activation_codes WHERE code !~ '^ALC[0-9]{3}$';
+
 -- Add a CHECK constraint ensuring code format is ALC + 3 digits
 DO $$
 BEGIN
   IF NOT EXISTS (
-    SELECT 1 FROM pg_constraints
+    SELECT 1 FROM pg_constraint
     WHERE conname = 'activation_codes_code_format'
   ) THEN
     ALTER TABLE public.activation_codes
@@ -44,7 +47,7 @@ END $$;
 DO $$
 BEGIN
   IF NOT EXISTS (
-    SELECT 1 FROM pg_constraints
+    SELECT 1 FROM pg_constraint
     WHERE conname = 'activation_codes_code_key'
   ) THEN
     ALTER TABLE public.activation_codes ADD UNIQUE (code);
