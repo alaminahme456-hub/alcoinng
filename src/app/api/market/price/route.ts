@@ -1,33 +1,56 @@
 import { NextResponse } from 'next/server';
 
+/**
+ * Server-side deterministic price generator.
+ * Same algorithm as in /api/market/trade and /api/market/settle.
+ */
+function generateServerPrice(seed: number): number {
+  const base = 80;
+  const wave = Math.sin(seed / 1000) * 5;
+  const noise = Math.sin(seed * 7.13) * 2 + Math.cos(seed * 3.71) * 1.5;
+  return Math.max(10, Math.min(200, base + wave + noise));
+}
+
+/**
+ * GET /api/market/price
+ * Returns current server-generated price + server timestamp.
+ * Frontend uses serverTime to sync countdowns.
+ */
 export async function GET() {
   try {
-    const points = 50;
-    let price = 50 + Math.random() * 50; // Start between 50-100
-    const prices: { time: string; price: number }[] = [];
     const now = Date.now();
+    const currentPrice = Math.round(generateServerPrice(now) * 100) / 100;
+
+    // Generate recent price history for chart
+    const points = 60;
+    const prices: { time: string; price: number; timestamp: number }[] = [];
+    const intervalMs = 2000;
 
     for (let i = points; i >= 0; i--) {
-      const time = new Date(now - i * 60000); // 1 minute intervals
-      // Random walk with slight upward bias
-      const change = (Math.random() - 0.48) * 3;
-      price = Math.max(1, price + change);
+      const ts = now - i * intervalMs;
+      const price = Math.round(generateServerPrice(ts) * 100) / 100;
       prices.push({
-        time: time.toISOString(),
-        price: Math.round(price * 100) / 100,
+        time: new Date(ts).toLocaleTimeString('en-US', {
+          hour12: false,
+          hour: '2-digit',
+          minute: '2-digit',
+          second: '2-digit',
+        }),
+        price,
+        timestamp: ts,
       });
     }
 
-    const currentPrice = prices[prices.length - 1].price;
-    const prevPrice = prices[prices.length - 2].price;
+    const prevPrice = prices.length >= 2 ? prices[prices.length - 2].price : currentPrice;
     const change = currentPrice - prevPrice;
-    const changePercent = (change / prevPrice) * 100;
+    const changePercent = prevPrice > 0 ? (change / prevPrice) * 100 : 0;
 
     return NextResponse.json({
       currentPrice,
-      change,
+      change: Math.round(change * 100) / 100,
       changePercent: Math.round(changePercent * 100) / 100,
       prices,
+      serverTime: new Date(now).toISOString(),
     });
   } catch (error: unknown) {
     console.error('Price error:', error);

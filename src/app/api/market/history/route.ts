@@ -25,8 +25,14 @@ export async function GET(req: NextRequest) {
     if (wallet && ['reward', 'deposit', 'profit'].includes(wallet)) {
       query = query.eq('funding_wallet', wallet);
     }
-    if (result && ['win', 'loss'].includes(result)) {
-      query = query.eq('result', result);
+    if (result && ['win', 'loss', 'won', 'lost', 'active'].includes(result)) {
+      if (result === 'won' || result === 'win') {
+        query = query.in('result', ['win']);
+      } else if (result === 'lost' || result === 'loss') {
+        query = query.in('result', ['loss']);
+      } else {
+        query = query.eq('status', result);
+      }
     }
     if (startDate) {
       query = query.gte('created_at', new Date(startDate).toISOString());
