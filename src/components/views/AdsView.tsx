@@ -50,8 +50,8 @@ export default function AdsView() {
 
   // CPAlead offerwall
   const CPALEAD_OFFERWALL_URL = 'https://www.appstorevault.mobi/wall/FhgCA4tm';
-  const cpaleadOfferwallUrl = user?.id
-    ? `${CPALEAD_OFFERWALL_URL}?subid=${encodeURIComponent(user.id)}`
+  const cpaleadOfferwallUrl = user?.clerkId
+    ? `${CPALEAD_OFFERWALL_URL}?subid=${encodeURIComponent(user.clerkId)}`
     : null;
 
   // AdSense ad state
