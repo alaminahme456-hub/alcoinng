@@ -1,18 +1,19 @@
 'use client';
 
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useAppStore, apiFetch } from '@/store';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
-import { ArrowLeft, ShieldCheck, ShieldX, KeyRound, MessageCircle, CheckCircle2, AlertCircle, FileText } from 'lucide-react';
+import { ArrowLeft, ShieldCheck, ShieldX, KeyRound, MessageCircle, CheckCircle2, AlertCircle, FileText, Clock } from 'lucide-react';
 
 const ALC_FORMAT = /^ALC[0-9]{3}$/;
+const PROMO_END = new Date('2026-10-06T11:40:00.000Z').getTime();
 
 const ACTIVATION_TERMS = [
-  'The activation fee is ₦5,000 (non-refundable).',
+  'The promotional activation fee is ₦3,000 (non-refundable).',
   'Each activation code can only be used once.',
   'Activation codes are issued only by authorized ALCOIN administrators.',
   'Sharing, selling, or transferring activation codes is strictly prohibited.',
@@ -30,6 +31,25 @@ export default function ActivateView() {
   const [success, setSuccess] = useState(false);
   const [termsAccepted, setTermsAccepted] = useState(false);
   const [showTerms, setShowTerms] = useState(false);
+  const [timeLeft, setTimeLeft] = useState(() => Math.max(0, PROMO_END - Date.now()));
+
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      setTimeLeft(Math.max(0, PROMO_END - Date.now()));
+    }, 1000);
+
+    return () => window.clearInterval(timer);
+  }, []);
+
+  const countdown = useMemo(() => {
+    const totalSeconds = Math.floor(timeLeft / 1000);
+    return {
+      days: Math.floor(totalSeconds / 86400),
+      hours: Math.floor((totalSeconds % 86400) / 3600),
+      minutes: Math.floor((totalSeconds % 3600) / 60),
+      seconds: totalSeconds % 60,
+    };
+  }, [timeLeft]);
 
   const formatError = useMemo(() => {
     if (!code) return '';
@@ -41,7 +61,7 @@ export default function ActivateView() {
   }, [code]);
 
   const whatsappMessage = encodeURIComponent(
-    'Hello ALCOIN Admin, I would like to activate my account. I need a ₦5,000 activation code. Username: ' + (user?.username || '') + '. Email: ' + (user?.email || '') + '.',
+    'Hello ALCOIN Admin, I would like to activate my account. I need a ₦3,000 promotional activation code. Username: ' + (user?.username || '') + '. Email: ' + (user?.email || '') + '.',
   );
   const whatsappLink = 'https://wa.me/2348000000000?text=' + whatsappMessage;
 
@@ -94,7 +114,6 @@ export default function ActivateView() {
       </header>
 
       <main className="px-4 pt-6 max-w-lg mx-auto space-y-6">
-        {/* Status Card */}
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
@@ -122,7 +141,6 @@ export default function ActivateView() {
           )}
         </motion.div>
 
-        {/* Activation Form */}
         {!user?.isActivated && !success && (
           <motion.form
             initial={{ opacity: 0, y: 20 }}
@@ -131,6 +149,39 @@ export default function ActivateView() {
             onSubmit={handleActivate}
             className="glass rounded-2xl p-6 space-y-5"
           >
+            <div className="rounded-xl border border-gold/30 bg-gold/5 p-4 text-center">
+              <p className="text-xs text-muted-foreground uppercase tracking-wider">Limited-Time Activation Offer</p>
+              <div className="mt-2 flex items-center justify-center gap-2">
+                <span className="text-sm text-muted-foreground line-through">₦5,000</span>
+                <span className="text-2xl font-bold text-gold">₦3,000</span>
+              </div>
+              <p className="text-xs text-muted-foreground mt-1">Save ₦2,000 on activation</p>
+
+              <div className="mt-4 pt-3 border-t border-white/10">
+                <div className="flex items-center justify-center gap-2 text-xs text-muted-foreground">
+                  <Clock className="w-3.5 h-3.5 text-gold" />
+                  <span>Offer ends in</span>
+                </div>
+                {timeLeft > 0 ? (
+                  <div className="mt-2 grid grid-cols-4 gap-2 max-w-xs mx-auto">
+                    {[
+                      ['Days', countdown.days],
+                      ['Hours', countdown.hours],
+                      ['Minutes', countdown.minutes],
+                      ['Seconds', countdown.seconds],
+                    ].map(([label, value]) => (
+                      <div key={label} className="rounded-lg bg-white/5 border border-white/10 py-2">
+                        <div className="text-lg font-bold font-mono text-gold">{String(value).padStart(2, '0')}</div>
+                        <div className="text-[10px] text-muted-foreground uppercase">{label}</div>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="mt-2 text-sm font-semibold text-destructive">This promotional offer has ended.</p>
+                )}
+              </div>
+            </div>
+
             <div className="space-y-2">
               <Label htmlFor="activationCode" className="text-sm text-muted-foreground">Activation Code</Label>
               <div className="relative">
@@ -149,7 +200,6 @@ export default function ActivateView() {
               </div>
             </div>
 
-            {/* Format error */}
             <AnimatePresence>
               {formatError && (
                 <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }}
@@ -159,7 +209,6 @@ export default function ActivateView() {
               )}
             </AnimatePresence>
 
-            {/* Server error */}
             <AnimatePresence>
               {error && !formatError && (
                 <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }}
@@ -169,7 +218,6 @@ export default function ActivateView() {
               )}
             </AnimatePresence>
 
-            {/* Activation Terms */}
             <div className="space-y-3">
               <button type="button" onClick={() => setShowTerms(!showTerms)}
                 className="flex items-center gap-2 text-sm text-gold hover:text-gold/80 transition-colors w-full">
@@ -193,7 +241,6 @@ export default function ActivateView() {
                 )}
               </AnimatePresence>
 
-              {/* Acceptance Checkbox */}
               <div className="flex items-start gap-3 cursor-pointer group" onClick={() => setTermsAccepted(!termsAccepted)}>
                 <div className={'w-5 h-5 mt-0.5 rounded border-2 flex items-center justify-center transition-all duration-200 ' + (termsAccepted ? 'bg-gold border-gold' : 'border-white/20 group-hover:border-white/40')}>
                   {termsAccepted && (
@@ -232,7 +279,6 @@ export default function ActivateView() {
           </motion.form>
         )}
 
-        {/* Success State */}
         {success && (
           <motion.div initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }} className="glass rounded-2xl p-8 text-center">
             <motion.div initial={{ scale: 0 }} animate={{ scale: 1 }} transition={{ type: 'spring', stiffness: 200, delay: 0.2 }}
@@ -244,9 +290,11 @@ export default function ActivateView() {
           </motion.div>
         )}
 
-        {/* Info Section */}
         <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.2 }} className="glass rounded-2xl p-6 space-y-3">
-          <h3 className="font-semibold text-sm">Activation Fee: ₦5,000</h3>
+          <h3 className="font-semibold text-sm">
+            <span className="line-through text-muted-foreground mr-2">₦5,000</span>
+            <span className="text-gold">Activation Fee: ₦3,000</span>
+          </h3>
           <ul className="space-y-2 text-sm text-muted-foreground">
             <li className="flex items-start gap-2"><CheckCircle2 className="w-4 h-4 text-gold shrink-0 mt-0.5" /><span>Access deposit and withdrawal features</span></li>
             <li className="flex items-start gap-2"><CheckCircle2 className="w-4 h-4 text-gold shrink-0 mt-0.5" /><span>Complete offers and tasks for rewards</span></li>
