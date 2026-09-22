@@ -119,7 +119,7 @@ export default function ReferralView() {
           className="glass rounded-2xl p-6 gold-glow"
         >
           <h3 className="font-semibold text-sm mb-1">Your Referral Code</h3>
-          <p className="text-xs text-muted-foreground mb-4">Share this code with friends to earn rewards</p>
+          <p className="text-xs text-muted-foreground mb-4">Invite 10 people to sign up, then have at least 2 of them activate their accounts to unlock ₦2,000.</p>
           <div className="flex items-center gap-2">
             <div className="flex-1 glass-strong rounded-xl px-4 py-3 font-mono text-lg font-bold text-center tracking-widest gradient-gold-text">
               {referralCode || 'N/A'}
@@ -201,21 +201,45 @@ export default function ReferralView() {
           transition={{ delay: 0.3 }}
           className="glass rounded-2xl p-6"
         >
-          <h3 className="font-semibold text-sm mb-3">How Referrals Work</h3>
+          <h3 className="font-semibold text-sm mb-3">Referral Reward</h3>
           <ol className="space-y-3 text-sm text-muted-foreground">
             <li className="flex items-start gap-3">
               <span className="w-6 h-6 rounded-full bg-gold/10 flex items-center justify-center shrink-0 text-gold text-xs font-bold">1</span>
-              <span>Share your referral code or link with friends</span>
+              <span>Invite 10 people using your referral code or link</span>
             </li>
             <li className="flex items-start gap-3">
               <span className="w-6 h-6 rounded-full bg-gold/10 flex items-center justify-center shrink-0 text-gold text-xs font-bold">2</span>
-              <span>They sign up and activate their account</span>
+              <span>All 10 must sign up, and at least 2 of those 10 must activate their accounts</span>
             </li>
             <li className="flex items-start gap-3">
               <span className="w-6 h-6 rounded-full bg-gold/10 flex items-center justify-center shrink-0 text-gold text-xs font-bold">3</span>
-              <span>You earn a bonus credited to your reward wallet</span>
+              <span>Once the requirement is met, ₦2,000 is credited to your Reward Wallet once</span>
             </li>
           </ol>
+        </motion.div>
+
+        {/* Referral Progress */}
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.35 }}
+          className="glass rounded-2xl p-6"
+        >
+          <div className="flex items-center justify-between mb-3">
+            <h3 className="font-semibold text-sm">Progress to ₦2,000</h3>
+            <span className="text-xs text-gold font-semibold">
+              {Math.min(data?.totalReferrals ?? 0, 10)}/10 sign-ups
+            </span>
+          </div>
+          <div className="h-2 rounded-full bg-white/10 overflow-hidden">
+            <div
+              className="h-full gradient-gold rounded-full transition-all"
+              style={{ width: Math.min(((data?.totalReferrals ?? 0) / 10) * 100, 100) + '%' }}
+            />
+          </div>
+          <p className="text-xs text-muted-foreground mt-3">
+            {Math.min(data?.activeReferrals ?? 0, 2)}/2 activated referrals required after reaching 10 sign-ups.
+          </p>
         </motion.div>
 
         {/* Referred Users List */}
