@@ -34,6 +34,8 @@ interface TaskItem {
   reward: number;
   requiresProof: boolean;
   maxSubmissions?: number;
+  actionUrl?: string;
+  autoApprove?: boolean;
   status?: 'none' | 'pending' | 'approved' | 'rejected';
   submittedAt?: string;
   rejectionReason?: string;
@@ -99,8 +101,13 @@ export default function TasksView() {
         body: JSON.stringify(body),
       });
 
-      toast.success('Task Submitted!', {
-        description: `${formatNaira(selectedTask.reward)} reward is pending approval.`,
+      const data = await apiFetch('/api/tasks/submit', {
+        method: 'POST',
+        body: JSON.stringify(body),
+      });
+
+      toast.success(data.autoRewarded ? 'Reward Credited!' : 'Task Submitted!', {
+        description: data.message || `${formatNaira(selectedTask.reward)} reward is pending approval.`,
       });
 
       // Update local state
@@ -300,6 +307,16 @@ export default function TasksView() {
                   )}
 
                   {/* Action */}
+                  {task.actionUrl && !isSubmitted && (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => window.open(task.actionUrl, '_blank', 'noopener,noreferrer')}
+                      className="h-9 px-4 text-xs font-semibold border-emerald-500/20 text-emerald-400 hover:bg-emerald-500/10"
+                    >
+                      Join Now
+                    </Button>
+                  )}
                   <Button
                     size="sm"
                     disabled={isSubmitted && !isRejected}
@@ -325,7 +342,7 @@ export default function TasksView() {
                     ) : (
                       <span className="flex items-center gap-1">
                         <Send className="w-3.5 h-3.5" />
-                        Submit Task
+                        {task.autoApprove ? 'Claim ₦' + task.reward : 'Submit Task'}
                       </span>
                     )}
                   </Button>
