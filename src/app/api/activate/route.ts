@@ -84,6 +84,75 @@ export async function POST(req: NextRequest) {
       activation_code_id: activationCode.id,
     }).eq('id', auth.id);
 
+    // 4b. Referral milestone:
+    // Invite 10 people who sign up, and have at least 2 of those 10 activate.
+    // The referrer receives a one-time ₦2,000 Reward Wallet bonus.
+    const { data: referrer } = await supabaseAdmin
+      .from('profiles')
+      .select('id, referral_reward_claimed')
+      .eq('id', auth.profile.referredBy || '')
+      .maybeSingle();
+
+    if (referrer && !referrer.referral_reward_claimed) {
+      const { count: referralCount } = await supabaseAdmin
+        .from('profiles')
+        .select('id', { count: 'exact', head: true })
+        .eq('referred_by', referrer.id);
+
+      const { count: activeReferralCount } = await supabaseAdmin
+        .from('profiles')
+        .select('id', { count: 'exact', head: true })
+        .eq('referred_by', referrer.id)
+        .eq('is_activated', true);
+
+      if ((referralCount || 0) >= 10 && (activeReferralCount || 0) >= 2) {
+        // Conditional update makes the milestone claim one-time even if
+        // two referred users activate at nearly the same time.
+        const { data: claimed } = await supabaseAdmin
+          .from('profiles')
+          .update({ referral_reward_claimed: true })
+          .eq('id', referrer.id)
+          .eq('referral_reward_claimed', false)
+          .select('id')
+          .maybeSingle();
+
+        if (claimed) {
+          const { data: rewardWallet } = await supabaseAdmin
+            .from('wallets')
+            .select('id, balance')
+            .eq('user_id', referrer.id)
+            .eq('type', 'reward')
+            .maybeSingle();
+
+          if (rewardWallet) {
+            await supabaseAdmin
+              .from('wallets')
+              .update({ balance: Number(rewardWallet.balance) + 2000 })
+              .eq('id', rewardWallet.id);
+
+            await insertAuditLog(
+              referrer.id,
+              'REFERRAL_MILESTONE_REWARD',
+              'Received ₦2,000 for referring 10 users with at least 2 activated accounts.',
+            );
+
+            await supabaseAdmin.from('notifications').insert({
+              user_id: referrer.id,
+              title: 'Referral Reward Unlocked!',
+              message: 'You invited 10 people and 2 of them activated their accounts. ₦2,000 has been credited to your Reward Wallet.',
+              type: 'reward',
+            });
+          } else {
+            // Do not permanently consume the milestone if the wallet is missing.
+            await supabaseAdmin
+              .from('profiles')
+              .update({ referral_reward_claimed: false })
+              .eq('id', referrer.id);
+          }
+        }
+      }
+    }
+
     // 5. Mark the code as used
     await supabaseAdmin.from('activation_codes').update({
       status: 'used',
