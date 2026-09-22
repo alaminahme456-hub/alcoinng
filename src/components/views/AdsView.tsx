@@ -55,7 +55,7 @@ export default function AdsView() {
 
           <h2 className="text-xl font-semibold">Complete Offers</h2>
           <p className="text-sm text-muted-foreground mt-2 max-w-md mx-auto">
-            Complete available offers and earn AL Coin rewards. New offers may be added regularly.
+            Complete eligible offers and earn rewards based on each offer's stated payout. Offer availability and rewards may vary.
           </p>
 
           <Button
