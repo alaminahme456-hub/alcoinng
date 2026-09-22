@@ -19,33 +19,9 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Bank name, account number, and account name are required' }, { status: 400 });
     }
 
-    // Check minimum amounts for reward wallet
-    if (wallet === 'reward') {
-      const oneWeekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
-      const { count: weekCount } = await supabaseAdmin
-        .from('withdrawals')
-        .select('*', { count: 'exact', head: true })
-        .eq('user_id', auth.id)
-        .eq('wallet', 'reward')
-        .gte('created_at', oneWeekAgo)
-        .in('status', ['pending', 'approved', 'paid']);
-
-      if ((!weekCount || weekCount === 0) && numAmount < 2000) {
-        return NextResponse.json({ error: 'Minimum weekly withdrawal for reward wallet is \u20a62,000' }, { status: 400 });
-      }
-
-      const oneMonthAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
-      const { count: monthCount } = await supabaseAdmin
-        .from('withdrawals')
-        .select('*', { count: 'exact', head: true })
-        .eq('user_id', auth.id)
-        .eq('wallet', 'reward')
-        .gte('created_at', oneMonthAgo)
-        .in('status', ['pending', 'approved', 'paid']);
-
-      if ((!monthCount || monthCount === 0) && numAmount < 8000) {
-        return NextResponse.json({ error: 'Minimum monthly withdrawal for reward wallet is \u20a68,000' }, { status: 400 });
-      }
+    // All withdrawals use the platform-wide minimum of ₦1,000.
+    if (numAmount < 1000) {
+      return NextResponse.json({ error: 'Minimum withdrawal amount is ₦1,000' }, { status: 400 });
     }
 
     // Check wallet balance
