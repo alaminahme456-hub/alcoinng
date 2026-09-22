@@ -283,11 +283,11 @@ export default function WithdrawView() {
           <ul className="space-y-2 text-sm text-muted-foreground">
             <li className="flex items-start gap-2">
               <span className="w-1.5 h-1.5 rounded-full bg-alcoin-blue shrink-0 mt-2" />
-              <span>Minimum withdrawal for reward wallet: <span className="text-foreground font-medium">₦2,000 weekly</span></span>
+              <span>Minimum withdrawal: <span className="text-foreground font-medium">₦1,000</span></span>
             </li>
             <li className="flex items-start gap-2">
               <span className="w-1.5 h-1.5 rounded-full bg-alcoin-blue shrink-0 mt-2" />
-              <span>Maximum withdrawal for reward wallet: <span className="text-foreground font-medium">₦8,000 monthly</span></span>
+              <span>Withdrawal rewards are subject to available wallet balance and platform review</span>
             </li>
             <li className="flex items-start gap-2">
               <span className="w-1.5 h-1.5 rounded-full bg-alcoin-blue shrink-0 mt-2" />
