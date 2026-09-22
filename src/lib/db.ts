@@ -6,6 +6,7 @@ import { supabaseAdmin } from './supabase/admin';
 export function mapProfileRow(row: Record<string, unknown>) {
   return {
     id: row.id,
+    clerkId: row.clerk_id,
     fullName: row.full_name,
     username: row.username,
     email: row.email || '',
