@@ -18,12 +18,19 @@ export async function GET(req: NextRequest) {
     const totalReferrals = referrals?.length || 0;
     const activeReferrals = referrals?.filter((r) => r.is_activated).length || 0;
 
+    const { data: currentProfile } = await supabaseAdmin
+      .from('profiles')
+      .select('referral_reward_claimed')
+      .eq('id', auth.id)
+      .single();
+
     return NextResponse.json({
       referralCode: auth.profile.referralCode,
       referralLink: `${process.env.NEXT_PUBLIC_APP_URL || ''}/register?ref=${auth.profile.referralCode}`,
       totalReferrals,
       activeReferrals,
-      referralEarnings: 0,
+      referralEarnings: currentProfile?.referral_reward_claimed ? 2000 : 0,
+      referralRewardClaimed: Boolean(currentProfile?.referral_reward_claimed),
       referrals: (referrals || []).map(r => ({
         id: r.id,
         fullName: r.full_name,
