@@ -28,6 +28,7 @@ export async function GET(req: NextRequest) {
     const receivedPassword = params.get('password') ?? '';
 
     if (!safeSecretEquals(expectedPassword, receivedPassword)) {
+      console.log('CPAlead diagnostic: invalid password');
       return NextResponse.json({ error: 'Invalid postback password' }, { status: 403 });
     }
 
@@ -36,10 +37,18 @@ export async function GET(req: NextRequest) {
     const payout = optionalNumber(params.get('payout'));
 
     if (!subid || leadId === null || !Number.isInteger(leadId) || leadId <= 0) {
+      console.log('CPAlead diagnostic: invalid subid/lead_id', {
+        has_subid: Boolean(subid),
+        lead_id: leadId,
+      });
       return NextResponse.json({ error: 'Missing or invalid subid/lead_id' }, { status: 400 });
     }
 
     if (payout === null || payout < 0 || !Number.isFinite(payout)) {
+      console.log('CPAlead diagnostic: invalid payout', {
+        lead_id: leadId,
+        payout,
+      });
       return NextResponse.json({ error: 'Missing or invalid payout' }, { status: 400 });
     }
 
@@ -68,14 +77,30 @@ export async function GET(req: NextRequest) {
     });
 
     if (error) {
-      console.error('CPAlead postback database error:', error);
+      console.error('CPAlead diagnostic: database error', {
+        lead_id: leadId,
+        payout,
+        error: error.message,
+      });
       return NextResponse.json({ error: 'Database processing failed' }, { status: 500 });
     }
 
     const result = Array.isArray(data) ? data[0] : data;
     if (!result) {
+      console.error('CPAlead diagnostic: no processing result', {
+        lead_id: leadId,
+        payout,
+      });
       return NextResponse.json({ error: 'No processing result' }, { status: 500 });
     }
+
+    console.log('CPAlead diagnostic: processed', {
+      lead_id: leadId,
+      payout,
+      result: result.reason,
+      processed: result.processed,
+      new_balance: result.new_balance,
+    });
 
     if (result.reason === 'duplicate_lead') {
       // CPAlead may retry a successful callback; never credit a lead twice.
