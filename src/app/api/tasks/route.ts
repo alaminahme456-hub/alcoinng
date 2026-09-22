@@ -10,7 +10,13 @@ export async function GET() {
       .order('created_at', { ascending: false });
 
     if (error) throw new Error(error.message);
-    return NextResponse.json({ tasks: rows || [] });
+    const tasks = (rows || []).map((row: any) => ({
+      ...row,
+      requiresProof: Boolean(row.requires_proof),
+      actionUrl: row.action_url || null,
+      autoApprove: Boolean(row.auto_approve),
+    }));
+    return NextResponse.json({ tasks });
   } catch (error: unknown) {
     console.error('Fetch tasks error:', error);
     const message = error instanceof Error ? error.message : 'Failed to fetch tasks';
