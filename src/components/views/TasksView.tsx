@@ -96,11 +96,6 @@ export default function TasksView() {
         body.proof = proofUrl.trim();
       }
 
-      await apiFetch('/api/tasks/submit', {
-        method: 'POST',
-        body: JSON.stringify(body),
-      });
-
       const data = await apiFetch('/api/tasks/submit', {
         method: 'POST',
         body: JSON.stringify(body),
@@ -114,7 +109,7 @@ export default function TasksView() {
       setTasks((prev) =>
         prev.map((t) =>
           t.id === selectedTask.id
-            ? { ...t, status: 'pending', submittedAt: new Date().toISOString() }
+            ? { ...t, status: data.autoRewarded ? 'approved' : 'pending', submittedAt: new Date().toISOString() }
             : t
         )
       );
