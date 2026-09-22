@@ -103,7 +103,7 @@ export default function DashboardView() {
 
   const navItems: { icon: typeof Home; label: string; view: ViewName }[] = [
     { icon: Home, label: 'Home', view: 'dashboard' },
-    { icon: Tv, label: 'Ads', view: 'ads' },
+    { icon: Tv, label: 'Offers', view: 'ads' },
     { icon: TrendingUp, label: 'Market', view: 'market' },
     { icon: User, label: 'Profile', view: 'profile' },
     ...(isAdmin ? [{ icon: LayoutDashboard, label: 'Admin', view: 'admin-dashboard' as ViewName }] : []),
