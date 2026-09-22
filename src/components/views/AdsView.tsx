@@ -48,6 +48,9 @@ export default function AdsView() {
   const [watchingReward, setWatchingReward] = useState(0);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
+  // CPAlead offerwall
+  const CPALEAD_OFFERWALL_URL = 'https://www.appstorevault.mobi/wall/FhgCA4tm';
+
   // AdSense ad state
   const [adsenseClaimed, setAdsenseClaimed] = useState(false);
   const [adsenseLoading, setAdsenseLoading] = useState(false);
@@ -249,6 +252,29 @@ export default function AdsView() {
             </motion.div>
           )}
         </AnimatePresence>
+
+        {/* CPAlead Offerwall */}
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="glass rounded-xl p-4 border border-gold/20"
+        >
+          <div className="flex items-center justify-between gap-3">
+            <div className="min-w-0">
+              <h3 className="font-semibold text-sm">Complete Offers</h3>
+              <p className="text-xs text-muted-foreground mt-1">
+                Complete available offers to earn AL Coin rewards.
+              </p>
+            </div>
+            <Button
+              size="sm"
+              onClick={() => window.open(CPALEAD_OFFERWALL_URL, '_blank', 'noopener,noreferrer')}
+              className="gradient-gold text-gold-foreground font-semibold h-9 px-4 text-xs shrink-0"
+            >
+              Complete Offers
+            </Button>
+          </div>
+        </motion.div>
 
         {/* ═══ Google AdSense Sponsored Ad ═══ */}
         <motion.div
