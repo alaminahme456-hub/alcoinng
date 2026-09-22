@@ -74,6 +74,8 @@ export async function POST(req: NextRequest) {
     }
 
     const now = new Date().toISOString();
+    // Activation is permanent. No expiry date is stored or enforced.
+
 
     // 4. Activate the user's account
     await supabaseAdmin.from('profiles').update({
