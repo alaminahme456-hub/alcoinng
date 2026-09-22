@@ -17,7 +17,7 @@ const ACTIVATION_TERMS = [
   'Activation codes are issued only by authorized ALCOIN administrators.',
   'Sharing, selling, or transferring activation codes is strictly prohibited.',
   'ALCOIN reserves the right to disable codes suspected of fraud or abuse.',
-  'Activation grants access to deposits, withdrawals, trading, ads, tasks, and referrals.',
+  'Activation grants ongoing access to deposits, withdrawals, trading, offers, tasks, and referrals while the account remains in good standing.',
   'ALCOIN may update these terms at any time; continued use constitutes acceptance.',
   'For support, contact ALCOIN via WhatsApp or email.',
 ];
@@ -249,7 +249,7 @@ export default function ActivateView() {
           <h3 className="font-semibold text-sm">Activation Fee: ₦5,000</h3>
           <ul className="space-y-2 text-sm text-muted-foreground">
             <li className="flex items-start gap-2"><CheckCircle2 className="w-4 h-4 text-gold shrink-0 mt-0.5" /><span>Access deposit and withdrawal features</span></li>
-            <li className="flex items-start gap-2"><CheckCircle2 className="w-4 h-4 text-gold shrink-0 mt-0.5" /><span>Watch ads and complete tasks for rewards</span></li>
+            <li className="flex items-start gap-2"><CheckCircle2 className="w-4 h-4 text-gold shrink-0 mt-0.5" /><span>Complete offers and tasks for rewards</span></li>
             <li className="flex items-start gap-2"><CheckCircle2 className="w-4 h-4 text-gold shrink-0 mt-0.5" /><span>Trade on the ALCOIN market and earn profits</span></li>
             <li className="flex items-start gap-2"><CheckCircle2 className="w-4 h-4 text-gold shrink-0 mt-0.5" /><span>Earn referral bonuses from friends</span></li>
           </ul>
