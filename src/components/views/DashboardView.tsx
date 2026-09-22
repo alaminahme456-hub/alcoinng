@@ -9,7 +9,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import {
   Home, Tv, TrendingUp, User, Bell, ShieldCheck, ShieldX,
   Wallet, PiggyBank, TrendingUpIcon, Users, ChevronRight, Lock,
-  Megaphone, CircleDot, LayoutDashboard,
+  Megaphone, CircleDot, LayoutDashboard, ClipboardCheck,
 } from 'lucide-react';
 
 interface Notification {
@@ -104,6 +104,7 @@ export default function DashboardView() {
   const navItems: { icon: typeof Home; label: string; view: ViewName }[] = [
     { icon: Home, label: 'Home', view: 'dashboard' },
     { icon: Tv, label: 'Offers', view: 'ads' },
+    { icon: ClipboardCheck, label: 'Tasks', view: 'tasks' },
     { icon: TrendingUp, label: 'Market', view: 'market' },
     { icon: User, label: 'Profile', view: 'profile' },
     ...(isAdmin ? [{ icon: LayoutDashboard, label: 'Admin', view: 'admin-dashboard' as ViewName }] : []),
