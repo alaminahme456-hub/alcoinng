@@ -165,7 +165,7 @@ export default function TasksView() {
           <div className="w-8 h-8 rounded-lg gradient-blue flex items-center justify-center">
             <ClipboardList className="w-4 h-4 text-alcoin-blue-foreground" />
           </div>
-          <h1 className="font-semibold text-lg">Task Center</h1>
+          <h1 className="font-semibold text-lg">ALTECH Tasks</h1>
         </div>
       </header>
 
@@ -181,7 +181,7 @@ export default function TasksView() {
             <div>
               <p className="text-sm font-medium">Complete Tasks, Earn Rewards</p>
               <p className="text-xs text-muted-foreground mt-0.5">
-                Complete simple tasks to earn AL Coin rewards. Some tasks require proof of completion.
+                Complete ALTECH tasks and earn rewards. Community tasks may credit your Reward Wallet immediately after a one-time claim.
               </p>
             </div>
           </div>
