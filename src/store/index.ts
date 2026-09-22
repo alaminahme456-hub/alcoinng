@@ -10,6 +10,7 @@ export type ViewName =
 
 interface UserData {
   id: string;
+  clerkId: string;
   fullName: string;
   username: string;
   email: string;
