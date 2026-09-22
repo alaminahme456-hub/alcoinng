@@ -79,7 +79,7 @@ const features = [
   { icon: TrendingUp, label: 'ALCOIN Market', desc: 'Predict market movements and multiply your gains.' },
 ];
 
-function AdSenseBanner() {
+function AdSenseBanner({ slot }: { slot: string }) {
   useEffect(() => {
     try {
       window.adsbygoogle = window.adsbygoogle || [];
@@ -95,7 +95,7 @@ function AdSenseBanner() {
         className="adsbygoogle"
         style={{ display: 'block' }}
         data-ad-client="ca-pub-9016878264107871"
-        data-ad-slot="1933775569"
+        data-ad-slot={slot}
         data-ad-format="auto"
         data-full-width-responsive="true"
       />
@@ -197,7 +197,7 @@ export default function LandingView() {
       </section>
 
       {/* ─── AdSense Banner ─── */}
-      <AdSenseBanner />
+      <AdSenseBanner slot="1933775569" />
 
       {/* ─── About ─── */}
       <section className="py-20 px-4">
@@ -274,7 +274,7 @@ export default function LandingView() {
       </section>
 
       {/* ─── Second AdSense Banner ─── */}
-      <AdSenseBanner />
+      <AdSenseBanner slot="7812788201" />
 
       {/* ─── How It Works ─── */}
       <section className="py-20 px-4">
