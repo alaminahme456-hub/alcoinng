@@ -38,7 +38,7 @@ const THUMBNAIL_COLORS = [
 ];
 
 export default function AdsView() {
-  const { setView } = useAppStore();
+  const { setView, user } = useAppStore();
   const [ads, setAds] = useState<AdItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -50,6 +50,9 @@ export default function AdsView() {
 
   // CPAlead offerwall
   const CPALEAD_OFFERWALL_URL = 'https://www.appstorevault.mobi/wall/FhgCA4tm';
+  const cpaleadOfferwallUrl = user?.id
+    ? `${CPALEAD_OFFERWALL_URL}?subid=${encodeURIComponent(user.id)}`
+    : null;
 
   // AdSense ad state
   const [adsenseClaimed, setAdsenseClaimed] = useState(false);
@@ -268,7 +271,13 @@ export default function AdsView() {
             </div>
             <Button
               size="sm"
-              onClick={() => window.open(CPALEAD_OFFERWALL_URL, '_blank', 'noopener,noreferrer')}
+              onClick={() => {
+                if (!cpaleadOfferwallUrl) {
+                  toast.error('Please log in before opening offers.');
+                  return;
+                }
+                window.open(cpaleadOfferwallUrl, '_blank', 'noopener,noreferrer');
+              }}
               className="gradient-gold text-gold-foreground font-semibold h-9 px-4 text-xs shrink-0"
             >
               Complete Offers
