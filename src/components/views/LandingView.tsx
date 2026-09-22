@@ -7,7 +7,7 @@ import {
   UserPlus,
   ShieldCheck,
   Wallet,
-  Eye,
+  ClipboardCheck,
   Users,
   TrendingUp,
   Banknote,
@@ -47,10 +47,10 @@ const steps = [
   },
   {
     num: 3,
-    title: 'Start Earning',
-    desc: 'After activation, you can watch advertisements for rewards, complete available tasks, invite friends using your referral link, and participate in the ALCOIN Market.',
+    title: 'Complete Offers & Earn Rewards',
+    desc: 'After activation, browse available offers, complete eligible tasks, invite friends using your referral link, and participate in the ALCOIN Market.',
     icon: Coins,
-    highlights: ['Watch advertisements for rewards', 'Complete available tasks', 'Invite friends using your referral link', 'Participate in the ALCOIN Market'],
+    highlights: ['Complete eligible offers', 'Rewards vary by offer', 'Invite friends using your referral link', 'Participate in the ALCOIN Market'],
   },
   {
     num: 4,
@@ -73,7 +73,7 @@ const steps = [
 ];
 
 const features = [
-  { icon: Eye, label: 'Watch Ads', desc: 'Earn rewards by watching curated advertisements.' },
+  { icon: ClipboardCheck, label: 'Complete Offers', desc: 'Complete eligible offers and earn the reward stated on each offer.' },
   { icon: Coins, label: 'Complete Tasks', desc: 'Finish simple tasks and get paid instantly.' },
   { icon: Users, label: 'Refer Friends', desc: 'Grow your earnings through referral bonuses.' },
   { icon: TrendingUp, label: 'ALCOIN Market', desc: 'Predict market movements and multiply your gains.' },
@@ -162,17 +162,16 @@ export default function LandingView() {
             variants={fadeUp}
             className="text-xl sm:text-2xl text-gold font-medium mb-6"
           >
-            Turn your spare time into earning.
+            Complete Offers. Earn Rewards.
           </motion.p>
           <motion.p
             custom={3}
             variants={fadeUp}
             className="text-muted-foreground max-w-2xl mx-auto text-sm sm:text-base leading-relaxed mb-10"
           >
-            ALCOIN is a digital rewards platform that allows users to earn money by completing
-            simple tasks, watching advertisements, referring friends, and participating in the
-            ALCOIN Market. With secure wallets and a user-friendly experience, ALCOIN provides
-            multiple ways to grow your earnings from one platform.
+            ALCOIN is a digital rewards platform that allows users to discover available offers, complete
+            eligible tasks, refer friends, and participate in the ALCOIN Market. Offer rewards vary
+            by offer, and the stated payout is shown before you start an eligible offer.
           </motion.p>
           <motion.div custom={4} variants={fadeUp} className="flex flex-col sm:flex-row items-center justify-center gap-4">
             <Button
@@ -363,8 +362,8 @@ export default function LandingView() {
             variants={fadeUp}
             className="text-muted-foreground max-w-xl mx-auto text-sm sm:text-base leading-relaxed mb-10 relative z-10"
           >
-            Join ALCOIN today and discover a simple way to earn, trade, and grow your funds on one
-            secure platform.
+            Discover available offers, complete eligible tasks, and earn rewards based on each offer's
+            stated payout. Minimum withdrawal: ₦1,000.
           </motion.p>
           <motion.div
             custom={2}
@@ -402,7 +401,7 @@ export default function LandingView() {
                 <span className="text-sm font-semibold gradient-gold-text">ALCOIN</span>
               </div>
               <p className="text-xs text-muted-foreground leading-relaxed">
-                A digital rewards platform that turns your spare time into earning.
+                A digital rewards platform for completing offers and earning rewards.
               </p>
             </div>
             <div>
