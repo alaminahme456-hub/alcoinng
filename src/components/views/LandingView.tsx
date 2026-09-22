@@ -1,5 +1,6 @@
 'use client';
 
+import { useEffect } from 'react';
 import { motion } from 'framer-motion';
 import {
   ArrowRight,
@@ -15,6 +16,12 @@ import {
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useAppStore } from '@/store';
+
+declare global {
+  interface Window {
+    adsbygoogle?: unknown[];
+  }
+}
 
 const fadeUp = {
   hidden: { opacity: 0, y: 30 },
@@ -72,6 +79,30 @@ const features = [
   { icon: TrendingUp, label: 'ALCOIN Market', desc: 'Predict market movements and multiply your gains.' },
 ];
 
+function AdSenseBanner() {
+  useEffect(() => {
+    try {
+      window.adsbygoogle = window.adsbygoogle || [];
+      window.adsbygoogle.push({});
+    } catch (error) {
+      console.error('AdSense initialization error:', error);
+    }
+  }, []);
+
+  return (
+    <div className="w-full max-w-5xl mx-auto px-4 py-8" aria-label="Advertisement">
+      <ins
+        className="adsbygoogle"
+        style={{ display: 'block' }}
+        data-ad-client="ca-pub-9016878264107871"
+        data-ad-slot="1933775569"
+        data-ad-format="auto"
+        data-full-width-responsive="true"
+      />
+    </div>
+  );
+}
+
 export default function LandingView() {
   const setView = useAppStore((s) => s.setView);
 
@@ -104,7 +135,6 @@ export default function LandingView() {
 
       {/* ─── Hero ─── */}
       <section className="relative pt-32 pb-20 px-4">
-        {/* Decorative glow */}
         <div className="absolute top-20 left-1/2 -translate-x-1/2 w-[500px] h-[500px] rounded-full bg-[#d4af37]/[0.06] blur-[120px] pointer-events-none" />
 
         <motion.div
@@ -165,6 +195,9 @@ export default function LandingView() {
           </motion.div>
         </motion.div>
       </section>
+
+      {/* ─── AdSense Banner ─── */}
+      <AdSenseBanner />
 
       {/* ─── About ─── */}
       <section className="py-20 px-4">
@@ -255,7 +288,6 @@ export default function LandingView() {
           </motion.h2>
 
           <div className="relative space-y-8">
-            {/* Vertical line */}
             <div className="absolute left-6 top-4 bottom-4 w-px bg-gradient-to-b from-gold/40 via-gold/20 to-transparent hidden sm:block" />
 
             {steps.map((step, i) => {
@@ -270,14 +302,12 @@ export default function LandingView() {
                   variants={fadeUp}
                   className="relative flex gap-5 sm:gap-8"
                 >
-                  {/* Step circle */}
                   <div className="relative z-10 flex-shrink-0">
                     <div className="w-12 h-12 rounded-full gradient-gold flex items-center justify-center shadow-lg">
                       <Icon className="w-5 h-5 text-[#0a0a0f]" />
                     </div>
                   </div>
 
-                  {/* Content card */}
                   <div className="glass rounded-2xl p-6 sm:p-7 flex-1 hover:gold-glow transition-shadow duration-300">
                     <div className="flex items-center gap-3 mb-3">
                       <span className="text-xs font-bold text-gold bg-gold/10 border border-gold/20 px-2.5 py-0.5 rounded-full">
@@ -314,7 +344,6 @@ export default function LandingView() {
           viewport={{ once: true, margin: '-80px' }}
           className="max-w-3xl mx-auto text-center relative"
         >
-          {/* Glow behind CTA */}
           <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
             <div className="w-[400px] h-[200px] rounded-full bg-[#d4af37]/[0.08] blur-[100px]" />
           </div>
