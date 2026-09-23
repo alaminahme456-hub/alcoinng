@@ -63,7 +63,7 @@ export default function ActivateView() {
   const whatsappMessage = encodeURIComponent(
     'Hello ALCOIN Admin, I would like to activate my account. I need a ₦3,000 promotional activation code. Username: ' + (user?.username || '') + '. Email: ' + (user?.email || '') + '.',
   );
-  const whatsappLink = 'https://wa.me/2348000000000?text=' + whatsappMessage;
+  const whatsappLink = 'https://wa.me/2349044084763?text=' + whatsappMessage;
 
   const handleCodeChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const val = e.target.value.toUpperCase().replace(/[^ALC0-9]/g, '').slice(0, 6);
@@ -274,7 +274,7 @@ export default function ActivateView() {
             <a href={whatsappLink} target="_blank" rel="noopener noreferrer"
               className="flex items-center justify-center gap-2 w-full h-12 rounded-lg bg-emerald-600/20 border border-emerald-600/30 text-emerald-400 font-semibold text-sm hover:bg-emerald-600/30 transition-colors">
               <MessageCircle className="w-5 h-5" />
-              Get Activation Code
+              Buy Code
             </a>
           </motion.form>
         )}
