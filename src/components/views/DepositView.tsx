@@ -23,7 +23,7 @@ export default function DepositView() {
   const [successAmount, setSuccessAmount] = useState(0);
 
   const whatsappMessage = encodeURIComponent('Hello, I want to get a deposit code for my ALCOIN account.');
-  const whatsappLink = `https://wa.me/2348000000000?text=${whatsappMessage}`;
+  const whatsappLink = `https://wa.me/2349044084763?text=${whatsappMessage}`;
 
   const handleRedeem = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -198,7 +198,7 @@ export default function DepositView() {
               className="flex items-center justify-center gap-2 w-full h-12 rounded-lg bg-emerald-600/20 border border-emerald-600/30 text-emerald-400 font-semibold text-sm hover:bg-emerald-600/30 transition-colors"
             >
               <MessageCircle className="w-5 h-5" />
-              Get Deposit Code via WhatsApp
+              Buy Deposit Code via WhatsApp
             </a>
           </motion.form>
         )}
@@ -214,7 +214,7 @@ export default function DepositView() {
           <ol className="space-y-3 text-sm text-muted-foreground">
             <li className="flex items-start gap-3">
               <span className="w-6 h-6 rounded-full bg-gold/10 flex items-center justify-center shrink-0 text-gold text-xs font-bold">1</span>
-              <span>Click &quot;Get Deposit Code&quot; to request a code via WhatsApp</span>
+              <span>Click &quot;Buy Deposit Code&quot; to request a code via WhatsApp</span>
             </li>
             <li className="flex items-start gap-3">
               <span className="w-6 h-6 rounded-full bg-gold/10 flex items-center justify-center shrink-0 text-gold text-xs font-bold">2</span>
